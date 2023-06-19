@@ -1,0 +1,439 @@
+---
+title: "Chapter 3 - Sampling the Imaginary Notes"
+format: html
+---
+
+```{julia}
+using Distributions
+using StatisticalRethinking
+using StatsPlots
+using Logging
+using LaTeXStrings
+using DataFrames
+using AlgebraOfGraphics
+using AlgebraOfGraphics: density, histogram
+using CairoMakie
+using Turing
+using AbstractMCMC
+using Chain
+using StatsBase
+
+default(labels=false)
+```
+
+```{julia}
+Pr_Positive_Vampire = 0.95
+Pr_Positive_Mortal = 0.01
+Pr_Vampire = 0.001
+Pr_Positive = Pr_Positive_Vampire * Pr_Vampire +
+              Pr_Positive_Mortal * (1 - Pr_Vampire)
+Pr_Vampire_Positive = Pr_Positive_Vampire * Pr_Vampire / Pr_Positive
+```
+
+## 3.1 Sampling from a grid-approximate posterior
+```{julia}
+p_grid = collect(range(start = 0, stop = 1, length = 1000))
+prob_p = repeat([1], 1000)
+prob_data = pdf.(Binomial.(9, p_grid), 6)
+posterior = prob_data .* prob_p
+posterior = posterior / sum(posterior)
+```
+
+```{julia}
+samples = sample(p_grid, Weights(posterior), 10000, replace = true)
+samples_data = (; x = samples)
+
+samples_layer = data(samples_data) * 
+                mapping(:x) * 
+                density() 
+draw(samples_layer)
+```
+
+## 3.2 Sampling to summarize
+
+### 3.2.1 Intervals of defined boundaries
+```{julia}
+sum(posterior[p_grid .< 0.5])
+```
+
+### 3.2.2 Intervals of defined mass
+```{julia}
+quantile(samples, 0.8)
+```
+
+```{julia}
+quantile(samples, [0.1, 0.9])
+```
+
+```{julia}
+p_grid = collect(range(start = 0, stop = 1, length = 1000))
+prior = repeat([1], 1000)
+likelihood = pdf.(Binomial.(3, p_grid), 3)
+posterior = likelihood .* prior
+posterior = posterior / sum(posterior)
+samples = sample(p_grid, Weights(posterior), 10_000, replace = true)
+```
+
+```{julia}
+PI(samples; perc_prob = 0.5)
+```
+
+```{julia}
+hpdi(samples; alpha = 0.5)
+```
+
+### 3.2.3 Point estimates
+```{julia}
+p_grid[argmax(posterior)]
+```
+
+```{julia}
+mean(samples)
+median(samples)
+```
+
+```{julia}
+sum(posterior .* abs.(0.5 .- p_grid))
+```
+
+```{julia}
+loss = map(d -> sum(posterior .* abs.(d .- p_grid)), p_grid)
+p_grid[argmin(loss)]
+```
+
+## 3.3 Sampling to simulate prediction
+
+### 3.3.1 Dummy data
+```{julia}
+pdf.(Binomial(2, 0.7), 0:2)
+```
+
+```{julia}
+rand(Binomial(2, 0.7), 1)
+```
+
+```{julia}
+rand(Binomial(2, 0.7), 10)
+```
+
+```{julia}
+dummy_w = rand(Binomial(2, 0.7), 100_000)
+
+Dict(val => mean(dummy_w .== val) for val in 0:2)
+map(val -> mean(dummy_w .== val), 0:2)
+```
+
+```{julia}
+dummy_w = (; x = rand(Binomial(9, 0.7), 100_000))
+
+data(dummy_w) * mapping(:x) * histogram() |> draw
+```
+
+### 3.3.2 Model checking
+
+#### 3.3.2.1 Did the software work?
+
+#### 3.3.2.2 Is the model adequate?
+
+```{julia}
+w = rand(Binomial(9, 0.6), 10_000)
+w = rand.(Binomial.(9, samples))
+```
+
+## 3.4 Summary
+
+## 3.5 Practice
+
+```{julia}
+p_grid = collect(range(start = 0, stop = 1, length = 1000))
+prior = repeat([1], 1000)
+likelihood = pdf.(Binomial.(9, p_grid), 6)
+posterior = likelihood .* prior
+posterior = posterior / sum(posterior)
+```
+
+```{julia}
+samples = sample(p_grid, Weights(posterior), 10_000, replace = true)
+```
+
+### 3E1
+How much posterior probability lies below $p = 0.2$?
+
+0.001 posterior probability lies below $p = 0.2$.
+```{julia}
+mean(samples .< 0.2)
+```
+
+### 3E2
+How much posterior probability lies above $p = 0.8$?
+
+0.1212 posterior probability lies above $p = 0.8$.
+```{julia}
+mean(samples .> 0.8)
+```
+
+### 3E3
+How much posterior probability lies between $p = 0.2$ and $p = 0.8$?
+
+0.8778 posterior probability lies between $p = 0.2$ and $p = 0.8$.
+```{julia}
+mean((samples .>= 0.2) .& (samples .<= 0.8))
+```
+
+### 3E4
+20% of the posterior probability lies below which value of $p$?
+
+20% of the posterior probability lies below $p = 0.5195$.
+```{julia}
+quantile(samples, 0.2)
+```
+
+### 3E5
+20% of the posterior probability lies above which value of $p$?
+
+20% of the posterior probability lies above $p = 0.7607$.
+```{julia}
+quantile(samples, 0.8)
+```
+
+### 3E6
+Which values of $p$ contain the narrowest interval equal to 66% of the posterior probability?
+
+The values of $p$ that contain the narrowest interval equal to 66% of the posterior probability are (0.6086, 0.7357).
+```{julia}
+hpdi(samples; alpha = 0.66)
+```
+
+### 3E7
+Which values of $p$ contain 66% of the posterior probability, assuming equal posterior probability both below and above the interval?
+
+The values of $p$ that contain 66% of the posterior probability, assuming equal posterior probability both below and above the interval are (0.5025, 0.7757).
+```{julia}
+PI(samples; perc_prob = 0.66)
+```
+
+### 3M1
+Suppose the globe tossing data had turned out to be 8 water in 15 tosses. Construct the posterior distribution, using grid approximation. Use the same flat prior as before.
+```{julia}
+p_grid = collect(range(start = 0, stop = 1, length = 1000))
+prior = repeat([1], length(p_grid))
+likelihood = pdf.(Binomial.(15, p_grid), 8)
+posterior = prior .* likelihood
+posterior = posterior / sum(posterior)
+```
+
+### 3M2
+Draw 10,000 samples frrom the grid approximation from above. Then use the samples to calculate the 90% HPDI for $p$.
+
+The 90% HDPI for $p$ is (0.4964, 0.5255).
+```{julia}
+samples = sample(p_grid, Weights(posterior), 10_000, replace = true)
+hpdi(samples; alpha = 0.9)
+```
+
+### 3M3
+Construct a posterior predictive check for this model and data. This means simulate the distribution of samples, averaging over the posterior uncertainty in $p$. What is the probability of observing 8 water in 15 tosses?
+
+The probability of observing 8 water in 15 tosses is 14.68%.
+```{julia}
+posterior_predictive = rand.(Binomial.(15, samples))
+mean(posterior_predictive .== 8)
+```
+
+### 3M4
+Using the posterior distribution constructed from the new (8/15) data, now calculate the probability of observing 6 water in 9 tosses.
+```{julia}
+new_prior = posterior
+likelihood = pdf.(Binomial.(9, new_prior), 6)
+posterior = new_prior .* likelihood
+posterior = posterior / sum(posterior)
+```
+
+```{julia}
+samples = sample(p_grid, Weights(posterior), 10_000, replace = true)
+```
+
+The probability of observing 6 water in 9 tosses is 23.71%.
+```{julia}
+posterior_predictive = rand.(Binomial.(9, samples))
+mean(posterior_predictive .== 6)
+```
+
+### 3M5
+Start over at **3M1**, but now use a prior that is zero below $p = 0.5$ and a constant above $p = 0.5$. This corresponds to prior information that a majority of the Earth's surface is water. Repeat each problem above and compare the inferences. What difference does the better prior make? If it helps, compare inferences (using both prior) to the true value $p = 0.7$.
+
+### 3M1 (Take 2)
+```{julia}
+truncated_prior(p_grid) = ifelse.(p_grid .< 0.5, 0, 1)
+
+p_grid = collect(range(start = 0, stop = 1, length = 1000))
+prior = truncated_prior(p_grid)
+likelihood = pdf.(Binomial.(15, p_grid), 8)
+posterior = prior .* likelihood
+posterior = posterior / sum(posterior)
+```
+
+### 3M2 (Take 2)
+
+The 90% HPDI for $p$ is (0.5305, 0.5475).
+```{julia}
+samples = sample(p_grid, Weights(posterior), 10_000, replace = true)
+hpdi(samples; alpha = 0.9)
+```
+
+### 3M3 (Take 2)
+
+The probability of observing 8 water in 15 tosses is 15.57%.
+```{julia}
+posterior_predictive = rand.(Binomial.(15, samples))
+mean(posterior_predictive .== 8)
+```
+
+### 3M4 (Take 2)
+```{julia}
+new_prior = posterior
+likelihood = pdf.(Binomial.(9, new_prior), 6)
+posterior = new_prior .* likelihood
+posterior = posterior / sum(posterior)
+```
+
+The probability of observing 6 water in 9 tosses is 20.98%.
+```{julia}
+samples = sample(p_grid, Weights(posterior), 10_000, replace = true)
+posterior_predictive = rand.(Binomial.(9, samples))
+
+mean(posterior_predictive .== 6)
+```
+
+### 3M6
+Suppose you want to estimate the Earth's proportion of water very precisely. Specifically, you want the 99% percentile interval of the posterior distribution of $p$ to be only 0.05 wide. This means the distance between the upper and lower bound of the interval should be 0.05. How many times will you have to toss the globe to do this?
+
+Assuming the true value of $p$ is 0.7, it will take anywhere from 45 - 59 tosses of the globe to get the 99% percentile interval of the posterior distribution of $p$ to be only 0.05 wide.
+```{julia}
+width = 0
+n = 0
+p = 0.7
+w = 0
+draws = []
+p_grid = collect(range(0, 1, 100))
+prior = repeat([1], 100)
+
+while width != 0.05
+    n += 1
+    trial = rand(Binomial(1, p))
+    w += trial
+
+    likelihood = pdf.(Binomial.(n, p_grid), w)
+    posterior = prior .* likelihood
+    posterior = posterior / sum(posterior)
+
+    samples = sample(p_grid, Weights(posterior), 10_000, replace = true)
+    π_interval = PI(samples; perc_prob = 0.99)
+    width = round(π_interval[end] - π_interval[begin], digits = 2)
+
+    if width == 0.05
+        break
+    else
+        prior = posterior
+    end
+end
+```
+
+## 3H1
+
+Using grid approximation, compute the posterior distribution for the probability of a birth being a boy. Assume a uniform prior probability. Which parameter value maximizes the posterior probability?
+```{julia}
+birth1 = [1,0,0,0,1,1,0,1,0,1,0,0,1,1,0,1,1,0,0,0,1,0,0,0,1,0,
+0,0,0,1,1,1,0,1,0,1,1,1,0,1,0,1,1,0,1,0,0,1,1,0,1,0,0,0,0,0,0,0,
+1,1,0,1,0,0,1,0,0,0,1,0,0,1,1,1,1,0,1,0,1,1,1,1,1,0,0,1,0,1,1,0,
+1,0,1,1,1,0,1,1,1,1]
+
+birth2 = [0,1,0,1,0,1,1,1,0,0,1,1,1,1,1,0,0,1,1,1,0,0,1,1,1,0,
+1,1,1,0,1,1,1,0,1,0,0,1,1,1,1,0,0,1,0,1,1,1,1,1,1,1,1,1,1,1,1,1,
+1,1,1,0,1,1,0,1,1,0,1,1,1,0,0,0,0,0,0,1,0,0,0,1,1,0,0,1,0,0,1,1,
+0,0,0,1,1,1,0,0,0,0]
+```
+
+The parameter value that maximizes the posterior probability is 0.55.
+```{julia}
+p_grid = collect(range(0, 1, 1000))
+prior = repeat([1], 1000)
+num_boys = sum(birth1) + sum(birth2)
+num_births = length(birth1) + length(birth2)
+
+likelihood = pdf.(Binomial.(num_births, p_grid), num_boys)
+posterior = prior .* likelihood
+posterior = posterior / sum(posterior)
+
+MAP_estimate = p_grid[argmax(posterior)]
+```
+
+## 3H2
+
+Using the `sample()` function, draw 10,000 random parameter values from the posterior distribution you calculated above. Use these samples to estimate the 50%, 89%, and 97% highest posterior density intervals.
+
+```{julia}
+samples = sample(p_grid, Weights(posterior), 10_000, replace = true)
+
+hpdi_intervals = Dict(perc => hpdi(samples; alpha = perc) 
+                        for perc in [.50, .89, .97])
+```
+
+### 3H3
+
+Use `rbinom()` to simulate 10,000 replicates of 200 births. You should end up with 10,000 numbers, each one a count of boys out of 200 births. Compare the distribution of predicted numbers of boys to the actual count in the data (111 boys out of 200 births). There are many good ways to visualize the simulation, but the `dens()` command (part of the `rethinking` package) is probably the easiest way in this case. Does it look like the model fits the data well? That is, does the distribution of predictions include the actual observation as a central likely outcome?
+
+Based on the visualiztion, the model does appear to fit the data well as the observed number of births is a central likely outcome in the posterior predictive distribution.
+```{julia}
+births = (; posterior_predictive = rand.(Binomial.(200, samples)))
+observed_data = (; num_boys = [num_boys, maximum(births.posterior_predictive)])
+
+posterior_layer = data(births) *
+    mapping(:posterior_predictive) *
+    density() 
+observed_layer = data(observed_data) *
+    mapping(:num_boys) *
+    visual(Lines)
+
+draw(posterior_layer)
+```
+
+### 3H4
+Now compare 10,000 counts of boys from 100 simulated first borns only to the number of births in the first births, `birth1`. How does the model look in this light?
+
+The model still looks fine - 51 is a central likely outcome in the posterior predictive distribution.
+```{julia}
+num_boys = sum(birth1)
+num_births = length(birth1)
+likelihood = pdf.(Binomial.(num_births, p_grid), num_boys)
+posterior = prior .* likelihood
+posterior = posterior / sum(posterior)
+
+samples = sample(p_grid, Weights(posterior), 10_000, replace = true)
+births = (; posterior_predictive = rand.(Binomial.(100, samples)))
+```
+
+```{julia}
+data(births) *
+    mapping(:posterior_predictive) *
+    density() |>
+    draw
+```
+
+### 3H5
+The model assumes that sex of first and second births are independent. To check this assumption, focus now on second births that followed female first borns. Compare 10,000 simulated counts of boys to only those second births that followed girls. To do this correctly, you need to count the number of first borns who were girls and simulate that many births, 10,000 times. Compare the counts of boys in your simulations to the actual observed count of boys following girls. How does the model look in this light? Any guesses what is going on in these data?
+
+```{julia}
+num_boys_after_girls = sum(birth2[birth1 .== 0])
+total_num_girl_first_borns = length(birth2[birth1 .== 0])
+births = (; posterior_predictive = rand.(Binomial.(total_num_girl_first_borns, samples)))
+```
+
+Based on the model, it looks like the sex of first and second births are not independent. In fact, if the first birth is a female, it is more likely that the second birth will be a male.
+```{julia}
+data(births) *
+    mapping(:posterior_predictive) *
+    density() |>
+    draw
+```
+

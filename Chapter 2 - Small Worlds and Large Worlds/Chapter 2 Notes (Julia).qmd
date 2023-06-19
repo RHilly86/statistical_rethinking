@@ -1,0 +1,173 @@
+---
+title: "Chapter 2 - Small Worlds and Large Worlds"
+format: html
+---
+
+```{julia}
+using Distributions
+using StatisticalRethinking
+using StatsPlots
+using Logging
+using LaTeXStrings
+using DataFrames
+using AlgebraOfGraphics: density
+using AlgebraOfGraphics
+using CairoMakie
+using Turing
+using AbstractMCMC
+```
+
+## 2.1 The garden of forking data
+
+### 2.1.1 Counting possibilities
+
+### 2.1.2 Combining other information
+
+### 2.1.3 From counts to probability
+
+```{julia}
+ways = [0, 3, 8, 9, 0]
+ways / sum(ways)
+```
+
+## 2.2 Building a model
+
+### 2.2.1 A data story
+
+### 2.2.2 Bayesian updating
+
+```{julia}
+p_grid = collect(range(start = 0, stop = 1, length = 50))
+trial_data = [1, 0, 1, 1, 1, 0, 1, 0, 1]
+trials = collect(1:9)
+running_successes = cumsum(trial_data .== 1)
+
+outcomes = Dict(trial => pdf.(Binomial.(trial, p_grid), outcome)
+                for (trial, outcome) in zip(trials, running_successes))
+
+example = outcomes[1]
+example_data = (; x = p_grid, y = example)
+
+data(example_data) * mapping(:x, :y) * visual(Lines) |> draw
+```
+
+### 2.2.3 Evaluate
+
+## 2.3 Components of the model
+
+### 2.3.2 Definitions
+
+#### 2.3.2.1 Observed variables
+```{julia}
+pdf(Binomial(9, 0.5), 6)
+```
+
+#### 2.3.2.2 Unobserved variables
+
+### 2.3.3 A model is born
+
+## 2.4 Making the model go
+
+### 2.4.1 Bayes' theorem
+
+### 2.4.2 Motors
+
+### 2.4.3 Grid approximation
+```{julia}
+p_grid = collect(range(start = 0, stop = 1, length = 20))
+prior = repeat([1], 20)
+likelihood = pdf.(Binomial.(9, p_grid), 6)
+posterior = likelihood .* prior
+posterior = posterior / sum(posterior)
+```
+
+```{julia}
+uniform_prior(p_grid) = repeat([1], length(p_grid))
+truncated_prior(p_grid) = ifelse.(p_grid .< 0.5, 0, 1)
+exponential_prior(p_grid) = @.exp(-5 * abs(p_grid - 0.5))
+
+function grid_approximation(prior_func, grid_size, w, n)
+    p_grid = collect(range(start = 0, stop = 1, length = grid_size))
+    prior = prior_func(p_grid)
+    likelihood = pdf.(Binomial.(n, p_grid), w)
+    posterior = likelihood .* prior
+    posterior = posterior / sum(posterior)
+
+    return Dict(:p_grid => p_grid, :posterior => posterior)
+end
+```
+
+### 2.4.4 Quadratic approximation
+```{julia}
+@model function globe_qa(N, W)
+    p ~ Uniform(0, 1)
+    W ~ Binomial(N, p)
+    return W
+end
+
+globe_qa_chain = sample(globe_qa(9, 6), NUTS(), MCMCThreads(), 1000, 4)
+```
+
+### 2.4.5 Markov chain Monte Carlo
+
+## 2.5 Summary
+
+## 2.5 Practice
+
+### 2M1
+Recall the globe tossing model from the chapter. Compute and plot the grid approximate distribution for each of the following sets of observations. In each case, assume a uniform prior for $p$.
+
+1. W, W, W
+2. W, W, W, L
+3. L, W, W, L, W, W, W
+
+```{julia}
+observations = Dict(
+    :obs_1 => [:W, :W, :W],
+    :obs_2 => [:W, :W, :W, :L],
+    :obs_3 => [:L, :W, :W, :L, :W, :W, :W]
+)
+
+posterior_dists = Dict()
+
+for key in keys(observations)
+    n = length(observations[key])
+    w = sum(observations[key] .== :W)
+    posterior = grid_approximation(uniform_prior, 50, w, n)[:posterior]
+    posterior_dists[key] = posterior
+end
+
+observations_data = DataFrame(
+    obs = vcat(map(key -> posterior_dists[key], collect(keys(posterior_dists)))...),
+    p_grid = repeat(collect(range(0, 1, 50)), 3),
+    label = vcat(map(key -> repeat([key], 50), collect(keys(posterior_dists)))...),
+)
+
+
+data(observations_data) * mapping(:p_grid, :obs, col = :label) * visual(Lines) |> draw 
+```
+
+### 2M2
+```{julia}
+posterior_dists = Dict()
+
+for key in keys(observations)
+    n = length(observations[key])
+    w = sum(observations[key] .== :W)
+    posterior = grid_approximation(truncated_prior, 50, w, n)[:posterior]
+    posterior_dists[key] = posterior
+end
+
+observations_data = DataFrame(
+    obs = vcat(map(key -> posterior_dists[key], collect(keys(posterior_dists)))...),
+    p_grid = repeat(collect(range(0, 1, 50)), 3),
+    label = vcat(map(key -> repeat([key], 50), collect(keys(posterior_dists)))...)
+)
+
+data(observations_data) * mapping(:p_grid, :obs, col = :label) * visual(Lines) |> draw
+```
+
+### 2M3
+```{julia}
+
+```
