@@ -3,130 +3,163 @@ title: "Chapter 3 - Sampling the Imaginary Notes"
 format: html
 ---
 
-```{julia}
-using Distributions
-using StatisticalRethinking
-using StatsPlots
-using Logging
-using LaTeXStrings
-using DataFrames
-using AlgebraOfGraphics
-using AlgebraOfGraphics: density, histogram
-using CairoMakie
-using Turing
-using AbstractMCMC
-using Chain
-using StatsBase
-
-default(labels=false)
+```{r}
+library(rethinking)
+library(tidyverse)
 ```
 
-```{julia}
-Pr_Positive_Vampire = 0.95
-Pr_Positive_Mortal = 0.01
-Pr_Vampire = 0.001
-Pr_Positive = Pr_Positive_Vampire * Pr_Vampire +
-              Pr_Positive_Mortal * (1 - Pr_Vampire)
-Pr_Vampire_Positive = Pr_Positive_Vampire * Pr_Vampire / Pr_Positive
+
+```{r}
+Pr_Positive_Vampire <- 0.95
+Pr_Positive_Mortal <- 0.01
+Pr_Vampire <- 0.001
+Pr_Positive <- Pr_Positive_Vampire * Pr_Vampire +
+  Pr_Positive_Mortal * (1 - Pr_Vampire)
+Pr_Vampire_Positive <- Pr_Positive_Vampire * Pr_Vampire / Pr_Positive
 ```
 
 ## 3.1 Sampling from a grid-approximate posterior
-```{julia}
-p_grid = collect(range(start = 0, stop = 1, length = 1000))
-prob_p = repeat([1], 1000)
-prob_data = pdf.(Binomial.(9, p_grid), 6)
-posterior = prob_data .* prob_p
+
+The posterior here means the probability of $p$ conditional on the data.
+```{r}
+p_grid = seq(0, 1, length.out = 1000)
+prob_p = rep(1, 1000) 
+prob_data = dbinom(6, 9, p_grid)
+posterior = prob_data * prob_p
 posterior = posterior / sum(posterior)
 ```
 
-```{julia}
-samples = sample(p_grid, Weights(posterior), 10000, replace = true)
-samples_data = (; x = samples)
-
-samples_layer = data(samples_data) * 
-                mapping(:x) * 
-                density() 
-draw(samples_layer)
+```{r}
+p_grid[1]
 ```
+
+```{r}
+```
+
+After tossing the globe 9 times, we observed 6 waters. Because of this, the posterior probability of $p = 0$ is also 0 since we observed water.
+```{r}
+posterior[1]
+```
+
+Now that we have a posterior that maps each value of $p_grid$ to an associated probability, we can draw samples from it in order to understand the relative probabilities of each value. We do this below:
+
+```{r}
+samples = sample(p_grid, 10000, replace = TRUE, prob = posterior)
+
+tibble(samples = samples) |>
+    ggplot(aes(x = samples)) +
+    geom_density()
+```
+
+Here, we draw 10,000 samples from `p_grid`, weighted by the posterior probabilities. So if say $p = 0.5$ is more plausible then $p = 0.2$, we'd expect their to be more samples for $p = 0.5$.
 
 ## 3.2 Sampling to summarize
 
+Now that we have a posterior, we can start doing more interesting things such as summarizing and interpreting it. For example, we can ask questions like how much posterior probability lies above/below a certain parameter value, how much posterior probability is between a range of parameter values, or what parameter value has the lowest/highest posterior probability.
+
 ### 3.2.1 Intervals of defined boundaries
-```{julia}
-sum(posterior[p_grid .< 0.5])
+
+Here, we use our grid approximation for $p$ to find out how much posterior probability is below $p = 0.5$.
+
+However, once we start incorporating more parameters into our posterior, we can't do this.
+```{r}
+# How much posterior probability is below p = 0.5?
+sum(posterior[p_grid < 0.5])
 ```
 
+But it's fine since we can essentially do the same thing with the samples we drew from the posterior!
+
+Here, we get 16.8%, which is close to the 17.1% we calculated above.
+```{r}
+mean(samples < 0.5)
+```
+
+We can also find out how much posterior probability lies between 0.5 and 0.75 like so:
+
+```{r}
+mean((samples > 0.5) & (samples < 0.75))
+```
+
+What's neat is that once we have the posterior, it's relatively straightforward to compute these types of summary statistics.
+
 ### 3.2.2 Intervals of defined mass
-```{julia}
+
+**Credible** or **compatability** intervals are a way to report the relative plausibility of a range of parameter values that are *compatible* with the data and model.
+
+To start, let's find the parameter value where 80% of the posterior probability lies below it:
+```{r}
 quantile(samples, 0.8)
 ```
 
-```{julia}
-quantile(samples, [0.1, 0.9])
+Here, we see that it's $p = 0.76$.
+
+Below, we find the parameter values that define the middle 80% of posterior probability:
+```{r}
+quantile(samples, c(0.1, 0.9))
 ```
 
-```{julia}
-p_grid = collect(range(start = 0, stop = 1, length = 1000))
-prior = repeat([1], 1000)
-likelihood = pdf.(Binomial.(3, p_grid), 3)
-posterior = likelihood .* prior
+Above, we calculated what's called a **percentile interval (PI)**, since we assigned equal probability mass to each tail. These intervals are good at reporting the shape of a distribution, so long as it's more or less symmetrical. However, they are not perfect as we'll see below:
+
+```{r}
+p_grid = seq(0, 1, length.out = 1000)
+prior = rep(1, 1000)
+likelihood = dbinom(3, 3, prob = p_grid)
+posterior = likelihood * prior
 posterior = posterior / sum(posterior)
-samples = sample(p_grid, Weights(posterior), 10_000, replace = true)
+
+samples = sample(p_grid, 10000, replace = TRUE, prob = posterior)
 ```
 
-```{julia}
-PI(samples; perc_prob = 0.5)
+Above, we use the same steps to create the posterior as we've done before. However, in this case, we observed 3 waters in 3 tosses. Therefore, our posterior will be highly skewed.
+
+Here, we see that the middle 50% posterior probability is between [0.708, 0.930]. However, when we plot it, it excludes the highest parameter values of $p$, which are close to 1.
+
+```{r}
+PI(samples, prob = 0.5)
 ```
 
-```{julia}
-hpdi(samples; alpha = 0.5)
+The **highest probability density interval (HPDI)** is the narrowest interval containing the specified probability mass. This interval contains the values of $p$ that are close to 1.
+
+```{r}
+HPDI(samples, prob = 0.5)
 ```
 
-### 3.2.3 Point estimates
-```{julia}
-p_grid[argmax(posterior)]
-```
+The HPDI has advantages over the PI (e.x. finding the interval with the most probability mass). However, in most most cases, the intervals will return similar results.
 
-```{julia}
-mean(samples)
-median(samples)
-```
+Also, the HPDI is not without it's disadvantages. Namely, it is:
+* More computationally intensive.
+* Is harder to convey to less technical audiences compared to the PI.
+* Suffers from *simulation variance* - i.e. it's influenced by the number of samples drawn from the posterior.
 
-```{julia}
-sum(posterior .* abs.(0.5 .- p_grid))
-```
-
-```{julia}
-loss = map(d -> sum(posterior .* abs.(d .- p_grid)), p_grid)
-p_grid[argmin(loss)]
+```{r}
+loss = map_dbl(p_grid, \(d) sum(posterior * abs(d - p_grid)))
+p_grid[which.min(loss)]
 ```
 
 ## 3.3 Sampling to simulate prediction
 
 ### 3.3.1 Dummy data
-```{julia}
-pdf.(Binomial(2, 0.7), 0:2)
+
+```{r}
+dbinom(0:2, 2, prob = 0.7)
 ```
 
-```{julia}
-rand(Binomial(2, 0.7), 1)
+```{r}
+rbinom(n = 1, size = 2, prob = 0.7)
+rbinom(n = 10, size = 2, prob = 0.7)
 ```
 
-```{julia}
-rand(Binomial(2, 0.7), 10)
+```{r}
+dummy_w = rbinom(n = 100000, size = 2, prob = 0.7)
+map_dbl(0:2, \(val) mean(dummy_w == val))
 ```
 
-```{julia}
-dummy_w = rand(Binomial(2, 0.7), 100_000)
+```{r}
+dummy_w = rbinom(n = 100000, size = 9, prob = 0.7)
 
-Dict(val => mean(dummy_w .== val) for val in 0:2)
-map(val -> mean(dummy_w .== val), 0:2)
-```
-
-```{julia}
-dummy_w = (; x = rand(Binomial(9, 0.7), 100_000))
-
-data(dummy_w) * mapping(:x) * histogram() |> draw
+tibble(samples = dummy_w) |>
+    ggplot(aes(x = samples)) +
+    geom_histogram()
 ```
 
 ### 3.3.2 Model checking
@@ -135,9 +168,9 @@ data(dummy_w) * mapping(:x) * histogram() |> draw
 
 #### 3.3.2.2 Is the model adequate?
 
-```{julia}
-w = rand(Binomial(9, 0.6), 10_000)
-w = rand.(Binomial.(9, samples))
+```{r}
+w = rbinom(n = 10000, size = 9, prob = 0.6)
+w = rbinom(n = length(samples), size = 9, prob = samples)
 ```
 
 ## 3.4 Summary
@@ -177,7 +210,7 @@ How much posterior probability lies between $p = 0.2$ and $p = 0.8$?
 
 0.8778 posterior probability lies between $p = 0.2$ and $p = 0.8$.
 ```{julia}
-mean((samples .>= 0.2) .& (samples .<= 0.8))
+mean((samples .> 0.2) .& (samples .< 0.8))
 ```
 
 ### 3E4
@@ -339,6 +372,37 @@ while width != 0.05
 end
 ```
 
+```{r}
+width = 0
+n = 0
+p = 0.7
+w = 0
+
+p_grid = seq(0, 1, length.out = 100)
+prior = rep(1, 100)
+
+while (width != 0.05) {
+    n = n + 1
+    trial = rbinom(1, 1, p)
+    w = w + trial
+    
+    likelihood = dbinom(w, n, p_grid)
+    posterior = prior * likelihood
+    posterior = posterior / sum(posterior)
+
+    samples = sample(p_grid, size = 10000, replace = TRUE, prob = posterior)
+    pi_interval = rethinking::PI(samples, prob = 0.99)
+    width = round(pi_interval[length(pi_interval)] - pi_interval[1], 2)
+
+    if (width == 0.05) {
+        break
+    } else {
+        prior = posterior
+    }
+
+}
+```
+
 ## 3H1
 
 Using grid approximation, compute the posterior distribution for the probability of a birth being a boy. Assume a uniform prior probability. Which parameter value maximizes the posterior probability?
@@ -352,6 +416,31 @@ birth2 = [0,1,0,1,0,1,1,1,0,0,1,1,1,1,1,0,0,1,1,1,0,0,1,1,1,0,
 1,1,1,0,1,1,1,0,1,0,0,1,1,1,1,0,0,1,0,1,1,1,1,1,1,1,1,1,1,1,1,1,
 1,1,1,0,1,1,0,1,1,0,1,1,1,0,0,0,0,0,0,1,0,0,0,1,1,0,0,1,0,0,1,1,
 0,0,0,1,1,1,0,0,0,0]
+```
+
+```{r}
+birth1 = c(1,0,0,0,1,1,0,1,0,1,0,0,1,1,0,1,1,0,0,0,1,0,0,0,1,0,
+0,0,0,1,1,1,0,1,0,1,1,1,0,1,0,1,1,0,1,0,0,1,1,0,1,0,0,0,0,0,0,0,
+1,1,0,1,0,0,1,0,0,0,1,0,0,1,1,1,1,0,1,0,1,1,1,1,1,0,0,1,0,1,1,0,
+1,0,1,1,1,0,1,1,1,1)
+
+birth2 = c(0,1,0,1,0,1,1,1,0,0,1,1,1,1,1,0,0,1,1,1,0,0,1,1,1,0,
+1,1,1,0,1,1,1,0,1,0,0,1,1,1,1,0,0,1,0,1,1,1,1,1,1,1,1,1,1,1,1,1,
+1,1,1,0,1,1,0,1,1,0,1,1,1,0,0,0,0,0,0,1,0,0,0,1,1,0,0,1,0,0,1,1,
+0,0,0,1,1,1,0,0,0,0)
+```
+
+```{r}
+p_grid = seq(0, 1, length.out = 1000)
+prior = rep(1, 1000)
+num_boys = sum(birth1) + sum(birth2)
+num_births = length(birth1) + length(birth2)
+
+likelihood = dbinom(num_boys, num_births, p_grid)
+posterior = prior * likelihood
+posterior = posterior / sum(posterior)
+
+MAP_estimate = p_grid[which.max(posterior)]
 ```
 
 The parameter value that maximizes the posterior probability is 0.55.
@@ -377,6 +466,15 @@ samples = sample(p_grid, Weights(posterior), 10_000, replace = true)
 
 hpdi_intervals = Dict(perc => hpdi(samples; alpha = perc) 
                         for perc in [.50, .89, .97])
+```
+
+```{r}
+samples = sample(p_grid, 10000, replace = TRUE, prob = posterior)
+hpdi_intervals = purrr::map(
+    c(.50, .89, .97),
+    \(perc) HPDI(samples, prob = perc)
+)
+
 ```
 
 ### 3H3
