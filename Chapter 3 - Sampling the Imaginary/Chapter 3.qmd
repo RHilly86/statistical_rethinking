@@ -3,13 +3,15 @@ title: "Chapter 3 - Sampling the Imaginary Notes"
 format: html
 ---
 
-```{r}
-library(rethinking)
-library(tidyverse)
+```{julia}
+using Distributions 
+using StatisticalRethinking
 ```
 
+```{julia}
+Pr_Positive_Vampire = 0.95
+Pr_Posititve_Mortal = 0.01
 
-```{r}
 Pr_Positive_Vampire <- 0.95
 Pr_Positive_Mortal <- 0.01
 Pr_Vampire <- 0.001
@@ -21,11 +23,13 @@ Pr_Vampire_Positive <- Pr_Positive_Vampire * Pr_Vampire / Pr_Positive
 ## 3.1 Sampling from a grid-approximate posterior
 
 The posterior here means the probability of $p$ conditional on the data.
-```{r}
-p_grid = seq(0, 1, length.out = 1000)
-prob_p = rep(1, 1000) 
-prob_data = dbinom(6, 9, p_grid)
-posterior = prob_data * prob_p
+
+```{julia}
+p_grid = collect(range(start=0, stop=1, length=1000))
+
+prior = repeat([1], 1000)
+likelihood = pdf.(Binomial.(9, p_grid), 6)
+posterior = prior .* likelihood
 posterior = posterior / sum(posterior)
 ```
 
