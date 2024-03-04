@@ -20,29 +20,40 @@ theme_set(theme_minimal())
 
 ### 2.1.1 Counting possibilities
 
-
 ### 2.1.2 Combining other information
 
 ### 2.1.3 From counts to probability
 
-Terms to add:
-* Parameter
-* Likelihood
-* Prior probability
-* Posterior probability
-
 ```{r}
-ways <- c(0, 3, 8, 9, 0)
+ways = c(0, 3, 8, 9, 0)
 ways / sum(ways)
 ```
 
-
 ## 2.2 Building a model
-
 
 ### 2.2.1 A data story
 
 ### 2.2.2 Bayesian updating
+```{r}
+data = c("W", "L", "W", "W", "W", "L", "W", "L", "W")
+p_water = seq(0, 1, length.out = 50)
+globe_tosses = tibble(
+  trial = 1:9,
+  outcome = data,
+  n_successes = cumsum(data == "W")
+) |> 
+  expand_grid(p_water = p_water) |> 
+  group_by(p_water) |>
+  mutate(
+    lagged_trial = lag(trial),
+    lagged_n_successes = lag(n_successes)
+  ) |> 
+  ungroup() |> 
+  mutate(prior = ifelse(trial == 1, .5,
+                        dbinom(x = lagged_n_successes, size = lagged_trial, prob = p_water)))
+  
+```
+
 
 ### 2.2.3 Evaluate
 
@@ -53,10 +64,6 @@ ways / sum(ways)
 ### 2.3.2 Definitions
 
 #### 2.3.2.1 Observed variables
-
-```{r}
-dbinom(6, 9, 0.5)
-```
 
 #### 2.3.2.2 Unobserved variables
 
@@ -70,188 +77,7 @@ dbinom(6, 9, 0.5)
 
 ### 2.4.3 Grid approximation
 
-```{r}
-uniform_prior <- \(p_grid) rep(1, length(p_grid))
-truncated_prior <- \(p_grid) if_else(p_grid < 0.5, 0, 1)
-double_exp_prior <- \(p_grid) exp(-5 * abs(p_grid - 0.5))
-```
-
-```{r}
-grid_approximation <- function(prior_func, grid_size, successes, trials) {
-    p_grid <- seq(0, 1, length.out = grid_size)
-    prior <- prior_func(p_grid) 
-    likelihood <- dbinom(successes, trials, p_grid)
-
-    unstd_posterior <- likelihood * prior
-    posterior <- unstd_posterior / sum(unstd_posterior)
-
-    list(p_grid = p_grid, posterior = posterior)
-}
-```
-
-```{r}
-p_grid <- seq(0, 1, length.out = 20)
-prior <- rep(1, 20)
-likelihood <- dbinom(6, 9, p_grid)
-unstd_posterior <- likelihood * prior
-posterior <- unstd_posterior / sum(unstd_posterior)
-
-posterior
-```
-
-```{r}
-grids <- c(5, 20)
-uniform_approximations <- map(.x = grids, 
-                      .f = \(grid) grid_approximation(uniform_prior, grid, successes = 6, trials = 9) |> 
-                                   as_tibble() |> mutate(points = grid)) |>
-                  bind_rows()
-
-uniform_approximations |>
-    ggplot(aes(x = p_grid, y = posterior)) +
-    geom_line() +
-    facet_wrap(~points, scales = "free_y") +
-    labs(title = "Uniform prior")
-```
-
-
-```{r}
-truncated_approximations <- map(
-    .x = grids,
-    .f = \(grid) grid_approximation(truncated_prior, grid, successes = 6, trials = 9) |>
-        as_tibble() |>
-        mutate(points = grid)
-) |>
-    bind_rows()
-
-truncated_approximations |>
-    ggplot(aes(x = p_grid, y = posterior)) +
-    geom_line() +
-    facet_wrap(~points, scales = "free_y") +
-    labs(title = "Truncated prior")
-```
-
-```{r}
-double_exp_approximations <- map(
-    .x = grids,
-    .f = \(grid) grid_approximation(double_exp_prior, grid, successes = 6, trials = 9) |>
-        as_tibble() |>
-        mutate(points = grid)
-) |>
-    bind_rows()
-
-double_exp_approximations |>
-    ggplot(aes(x = p_grid, y = posterior)) +
-    geom_line() +
-    facet_wrap(~points, scales = "free_y") +
-    labs(title = "Double exponential prior")
-```
-
-
 ### 2.4.4 Quadratic approximation
-
-```{r}
-w <- 6
-n <- 9
-x <- seq(0, 1, length.out = 100)
-true_posterior <- dbeta(x, w + 1, n - w + 1)
-```
-
-```{r}
-globe_mcmc <- cmdstan_model("Chapter 2 - Small Worlds and Large Worlds/binomial_model.stan")
-globe_fit <- globe_mcmc$sample(data = list(N = 9, y = 6), parallel_chains = 4)
-```
-
-```{r}
-as_draws_df(globe_fit)
-```
-
-```{r}
-p_water <- seq(0, 1, length.out = 50)
-
-posterior <- map2(
-    .x = data$trial,
-    .y = data$n_successes,
-    .f = \(trial, n) {
-        likelihood <- dbinom(n, trial, p_water)
-        tibble(p_water = p_water, 
-               likelihood = likelihood / sum(likelihood),
-               trial = trial)
-    }
-) |>
-    bind_rows()
-
-prior <- posterior |>
-    group_by(p_water) |>
-    mutate(
-        trial = lag(trial, n = 1),
-        likelihood = lag(likelihood, n = 1),
-        trial = trial + 1
-    ) |>
-    ungroup() |>
-    mutate(
-        trial = if_else(is.na(trial), 1, trial),
-        likelihood = ifelse(trial == 1, 0.5, likelihood),
-        likelihood = ifelse(trial == 1, likelihood / sum(likelihood[trial == 1]), likelihood)
-    ) |>
-    rename(prior = likelihood)
-
-df <- posterior |>
-    bind_cols(prior |> select(prior))
-```
-
-```{r}
-df |>
-    ggplot(aes(x = p_water)) +
-    geom_line(aes(y = prior), linetype = "dashed") +
-    geom_line(aes(y = likelihood)) +
-    facet_wrap(~trial, scales = "free_y")
-
-posterior |>
-    ggplot(aes(x = p_water, y = likelihood)) +
-    geom_line() +
-    facet_wrap(~trial, scales = "free_y")
-
-prior |>
-    ggplot(aes(x = p_water, y = likelihood)) +
-    geom_line() +
-    facet_wrap(~trial)
-```
-
-```{r}
-```
-
-```{r}
-data <- tibble(
-    toss = c("W", "L", "W", "W", "W", "L", "W", "L", "W"),
-    trial = 1:9,
-    n_successes = cumsum(toss == "W")
-)
-
-data <- data |>
-    expand_grid(p_water = seq(0, 1, length.out = 50)) |>
-    group_by(p_water) |>
-    mutate(lagged_trial = lag(trial, n = 1),
-           lagged_n_successes = lag(n_successes, n = 1)) |>
-    ungroup() |>
-    mutate(
-        prior = ifelse(trial == 1, .5, dbinom(lagged_n_successes, lagged_trial, p_water)),
-        likelihood = dbinom(n_successes, trial, p_water),
-        strip = str_c("n = ", trial)
-    ) |>
-    group_by(trial) |>
-    mutate(prior = prior / sum(prior),
-           likelihood = likelihood / sum(likelihood)) |>
-    ungroup()
-```
-
-
-```{r}
-data |>
-    ggplot(aes(x = p_water)) +
-    geom_line(aes(y = prior), linetype = "dashed") +
-    geom_line(aes(y = likelihood)) +
-    facet_wrap(~strip, scales = "free_y")
-```
 
 ## 2.6 Practice
 
@@ -295,50 +121,8 @@ Recall the globe tossing model from the chapter. Compute and plot the grid appro
 2. W, W, W, L
 3. L, W, W, L, W, W, W
 
-
-```{r}
-grid_size <- 50
-data <- list(
-    obs_1 = c(1, 1, 1),
-    obs_2 = c(1, 1, 1, 0),
-    obs_3 = c(0, 1, 1, 0, 1, 1, 1)
-)
-
-tosses <- map(
-    .x = data,
-    .f = \(obs) {
-        w <- sum(obs)
-        n <- length(obs)
-        grid_approximation(uniform_prior, grid_size, w, n)
-    }
-) |>
-    bind_rows(.id = "obs")
-
-tosses |>
-    ggplot(aes(x = p_grid, y = posterior)) +
-    geom_line() +
-    facet_wrap(~obs, scales = "free_y")
-```
-
 ### 2M2
 Now assume a prior for $p$ that is equal to zero when $p < 0.5$ and is a positive constant when $p \geq 0.5$. Again, compute and plot the grid approximate distribution for each of the following sets of observations in the problem just above.
-
-```{r}
-tosses <- map(
-    .x = data,
-    .f = \(obs) {
-        w <- sum(obs)
-        n <- length(obs)
-        grid_approximation(truncated_prior, grid_size, w, n)
-    }
-) |>
-    bind_rows(.id = "obs")
-
-tosses |>
-    ggplot(aes(x = p_grid, y = posterior)) +
-    geom_line() +
-    facet_wrap(~obs, scales = "free_y")
-```
 
 ### 2M3
 Suppose there are two globes, one for Earth an one for Mars. The Earth glove is 70% covered in water. The Mars glove is 100% land. Further suppose that one of these gloves - you don't know which - was tosses in the air and produced a "land" observation. Assume that each glove was equally likely to be tossed. Show that the posterior probability that the globe was the Earth, conditional on seeing "land" (Pr(Earth|land)) is 0.23.
