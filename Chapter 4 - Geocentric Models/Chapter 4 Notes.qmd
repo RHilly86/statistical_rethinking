@@ -1,0 +1,145 @@
+---
+title: "Chapter 4 Notes"
+format: html
+---
+
+```{r}
+library(collapse)
+library(rethinking)
+library(splines)
+library(distributions3)
+
+set_collapse(mask = "manip")
+```
+
+## 4.1 Why normal distributions are normal
+
+### 4.1.1 Normal by addition
+```{r}
+pos = replicate(1000, sum(random(Uniform(a = -1, b = 1), 16)))
+```
+
+### 4.1.2 Normal by multiplication
+```{r}
+prod(1 + random(Uniform(a = 0, b = 0.1), 12))
+```
+
+```{r}
+growth = replicate(10000, prod(1 + random(Uniform(a = 0, b = 0.1), 12)))
+dens(growth, norm.comp = TRUE)
+```
+
+```{r}
+big = replicate(10000, prod(1 + random(Uniform(a = 0, b = 0.5), 12)))
+small = replicate(10000, prod(1 + random(Uniform(a = 0, b = 0.01), 12)))
+```
+
+### 4.1.3 Normal by log-multiplication
+```{r}
+log_big = replicate(10000, log(prod(1 + random(Uniform(a = 0, b = 0.5), 12))))
+```
+
+### 4.1.4 Using Gaussian distributions
+
+## 4.2 A language for describing models
+
+### 4.2.1 Re-describing the globe tossing model
+```{r}
+w = 6; n = 9;
+p_grid = seq(0, 1, length.out = 100)
+posterior = pdf(Binomial(size = n, p = p_grid), w) * pdf(Uniform(a = 0, b = 1), p_grid)
+posterior = posterior / sum(posterior)
+```
+
+## 4.3 Gaussian model of height
+
+### 4.3.1 The data
+```{r}
+data(Howell1)
+d = Howell1
+```
+
+```{r}
+str(d)
+```
+
+```{r}
+precis(d)
+```
+
+```{r}
+d$height
+```
+
+```{r}
+d2 = subset(d, age >= 18)
+```
+
+### 4.3.2 The model
+
+```{r}
+curve(pdf(Normal(mu = 178, sigma = 20), x), from = 100, to = 250)
+```
+
+```{r}
+curve(pdf(Uniform(a = 0, b = 50), x), from = -10, to = 60)
+```
+
+```{r}
+sample_mu = random(Normal(mu = 178, sigma = 20), 10000)
+sample_sigma = random(Uniform(a = 0, b = 50), 10000)
+prior_h = random(Normal(mu = sample_mu, sigma = sample_sigma))
+dens(prior_h)
+```
+
+```{r}
+sample_mu = random(Normal(mu = 178, sigma = 100), 10000)
+prior_h = random(Normal(mu = sample_mu, sigma = sample_sigma))
+dens(prior_h)
+```
+
+### 4.3.3 Grid approximation of the posterior distribution
+```{r}
+mu_list = seq(150, 160, length.out = 100)
+sigma_list = seq(7, 9, length.out = 100)
+post = expand.grid(mu = mu_list, sigma = sigma_list)
+
+post$LL = sapply(1:nrow(post), \(i) sum(
+    log_pdf(Normal(mu = post$mu[i], sigma = post$sigma[i]), d2$height)
+))
+post$prod = post$LL + log_pdf(Normal(mu = 178, sigma = 20), post$mu) + log_pdf(Uniform(a = 0, b = 50), post$sigma)
+post$prob = exp(post$prod - max(post$prod))
+```
+
+```{r}
+contour_xyz(post$mu, post$sigma, post$prob)
+```
+
+```{r}
+image_xyz(post$mu, post$sigma, post$prob)
+```
+
+### 4.3.4 Sampling from the posterior
+```{r}
+sample_rows = sample(1:nrow(post), size = 10000, prob = post$prob, replace = TRUE)
+sample_mu = post$mu[sample_rows]
+sample_sigma = post$sigma[sample_rows]
+```
+
+```{r}
+plot(sample_mu, sample_sigma, cex = 0.5, pch = 16, col = col.alpha(rangi2, 0.1))
+```
+
+```{r}
+dens(sample_mu)
+dens(sample_sigma)
+```
+
+```{r}
+PI(sample_mu)
+PI(sample_sigma)
+```
+
+```{r}
+d3 = sample(d2$height, size = 20)
+```
