@@ -4,6 +4,7 @@ format: html
 ---
 
 ```{r}
+library(MASS)
 library(collapse)
 library(rethinking)
 library(splines)
@@ -142,4 +143,188 @@ PI(sample_sigma)
 
 ```{r}
 d3 = sample(d2$height, size = 20)
+```
+
+```{r}
+mu_list = seq(150, 170, length.out = 200)
+sigma_list = seq(4, 20, length.out = 200)
+post2 = expand.grid(mu = mu_list, sigma = sigma_list)
+
+post2$LL = sapply(1:nrow(post2), \(i) sum(
+    log_pdf(Normal(mu = post2$mu[i], sigma = post2$sigma[i]), d3)
+))
+post2$prod = post2$LL + log_pdf(Normal(mu = 178, sigma = 20), post2$mu) + log_pdf(Uniform(a = 0, b = 50), post2$sigma)
+
+sample2_rows = sample(1:nrow(post2), size = 1e4, prob = post2$prob, replace = TRUE)
+sample2_mu = post2$mu[sample2_rows]
+sample2_sigma = post2$sigma[sample2_rows]
+
+plot(sample2_mu, sample2_sigma, cex = 0.5,
+     col = col.alpha(rangi2, 0.1),
+     xlab = "mu", ylab = "sigma", pch = 16)
+```
+
+```{r}
+dens(sample2_sigma, norm.comp = TRUE)
+```
+
+### 4.3.5 Finding the posterior distribution with `quap`
+
+```{r}
+flist = alist(
+    height ~ dnorm(mu, sigma),
+    mu ~ dnorm(178, 20),
+    sigma ~ dunif(0, 50)
+)
+```
+
+```{r}
+m4_1 = quap(flist, data = d2)
+```
+
+```{r}
+precis(m4_1)
+```
+
+```{r}
+m4_2 = quap(
+    alist(
+        height ~ dnorm(mu, sigma),
+        mu ~ dnorm(178, 0.1),
+        sigma ~ dunif(0, 50)
+    ),
+    data = d2
+)
+precis(m4_2)
+```
+
+### 4.3.6 Sampling from a `quap`
+```{r}
+vcov(m4_1)
+```
+
+```{r}
+diag(vcov(m4_1))
+cov2cor(vcov(m4_1))
+```
+
+```{r}
+post = extract.samples(m4_1, n = 1e4)
+```
+
+```{r}
+head(post)
+precis(post)
+```
+
+```{r}
+post = mvrnorm(n = 1e4, mu = coef(m4_1), Sigma = vcov(m4_1))
+```
+
+## 4.4 Linear prediction
+
+```{r}
+plot(d2$height ~ d2$weight)
+```
+
+### 4.4.1 The linear model strategy
+
+#### 4.4.1.1 Probability of the data
+
+#### 4.4.1.2 Linear model
+
+#### 4.4.1.3 Priors
+```{r}
+set.seed(2971)
+
+N = 100
+a = random(Normal(mu = 178, sigma = 20), N)
+b = random(Normal(mu = 0, sigma = 10), N)
+```
+
+```{r}
+plot(NULL, xlim = range(d2$weight), ylim = c(-100, 400),
+           xlab = "weight", ylab = "height")
+abline(h = 0, lty = 2)
+abline(h = 272, lty = 1, lwd = 0.5)
+mtext("b ~ dnorm(0, 10)")
+xbar = mean(d2$weight)
+
+for (i in 1:N) {
+    curve(a[i] + b[i] * (x - xbar),
+    from = min(d2$weight), to = max(d2$weight), add = TRUE,
+    col = col.alpha("black", 0.2))
+}
+```
+
+```{r}
+b = random(LogNormal(log_mu = 0, log_sigma = 1), 1e4)
+dens(b, xlim = c(0, 5), adj = 0.1)
+```
+
+```{r}
+set.seed(2971)
+
+N = 100
+a = random(Normal(mu = 178, sigma = 20), N)
+b = random(LogNormal(log_mu = 0, log_sigma = 1), N)
+```
+
+### 4.4.2 Finding the posterior distribution
+```{r}
+xbar = mean(d2$weight)
+
+m4_3 = quap(
+    alist(
+        height ~ dnorm(mu, sigma),
+        mu <- a + b * (weight - xbar),
+        a ~ dnorm(178, 20),
+        b ~ dlnorm(0, 1),
+        sigma ~ dunif(0, 50)
+    ),
+    data = d2
+)
+```
+
+```{r}
+m4_3b = quap(
+    alist(
+        height ~ dnorm(mu, sigma),
+        mu <- a + exp(log_b) * (weight - xbar),
+        a ~ dnorm(178, 20),
+        log_b ~ dnorm(0, 1),
+        sigma ~ dunif(0, 50)
+    ),
+    data = d2
+)
+```
+
+### 4.4.3 Interpreting the posterior distribution
+
+#### 4.4.3.1 Tables of marginal distributions
+```{r}
+precis(m4_3)
+```
+
+```{r}
+round(vcov(m4_3), 3)
+```
+
+#### 4.4.3.2 Plotting posterior inference against the data
+```{r}
+plot(height ~ weight, data = d2, col = rangi2)
+post = extract.samples(m4_3)
+a_map = mean(post$a)
+b_map = mean(post$b)
+curve(a_map + b_map * (x - xbar), add = TRUE)
+```
+
+#### 4.4.3.3 Adding uncertainty around the mean
+```{r}
+post = extract.samples(m4_3)
+post[1:5, ]
+```
+
+```{r}
+
 ```
