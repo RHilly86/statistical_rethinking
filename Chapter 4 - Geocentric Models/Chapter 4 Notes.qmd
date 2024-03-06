@@ -326,5 +326,273 @@ post[1:5, ]
 ```
 
 ```{r}
-
+N = 10
+dN = d2[1:N, ]
+mN = quap(
+    alist(
+        height ~ dnorm(mu, sigma),
+        mu <- a + b * (weight - mean(weight)),
+        a ~ dnorm(178, 20),
+        b ~ dlnorm(0, 1),
+        sigma ~ dunif(0, 50)
+    ),
+    data = dN
+)
 ```
+
+```{r}
+post = extract.samples(mN, n = 20)
+
+plot(dN$weight, dN$height,
+     xlim = range(d2$weight), ylim = range(d2$height),
+     col = rangi2, xlab = "weight", ylab = "height")
+mtext(concat("N = ", N))
+
+for (i in 1:20) {
+    curve(post$a[i] + post$b[i] * (x - mean(dN$weight)),
+          col = col.alpha("black", 0.3), add = TRUE)
+}
+```
+
+#### 4.4.3.4 Plotting regression intervals and contours
+```{r}
+post = extract.samples(m4_3)
+mu_at_50 = post$a + post$b * (50 - xbar)
+```
+
+```{r}
+dens(mu_at_50, col = rangi2, lwd = 2, xlab = "mu|weight=50")
+```
+
+```{r}
+PI(mu_at_50, prob = 0.89)
+```
+
+```{r}
+mu = link(m4_3)
+str(mu)
+```
+
+```{r}
+weight_seq = seq(25, 70, by = 1)
+mu = link(m4_3, data = data.frame(weight = weight_seq))
+str(mu)
+```
+
+```{r}
+plot(height ~ weight, d2, type = "n")
+
+for (i in 1:100) {
+    points(weight_seq, mu[i, ], pch = 16, col = col.alpha(rangi2, 0.1))
+}
+```
+
+```{r}
+mu_mean = apply(mu, 2, mean)
+mu_PI = apply(mu, 2, PI, prob = 0.89)
+```
+
+```{r}
+plot(height ~ weight, data = d2, col = col.alpha(rangi2, 0.5))
+lines(weight_seq, mu_mean)
+shade(mu_PI, weight_seq)
+```
+
+#### 4.4.3.5 Prediction intervals
+```{r}
+sim_height = sim(m4_3, data = list(weight = weight_seq))
+str(sim_height)
+```
+
+```{r}
+height_PI = apply(sim_height, 2, PI, prob = 0.89)
+```
+
+```{r}
+plot(height ~ weight, d2, col = col.alpha(rangi2, 0.5))
+lines(weight_seq, mu_mean)
+shade(mu_PI, weight_seq)
+shade(height_PI, weight_seq)
+```
+
+```{r}
+sim_height = sim(m4_3, data = list(weight = weight_seq), n = 1e4)
+height_PI = apply(sim_height, 2, PI, prob = 0.89)
+```
+
+## 4.5 Curves from lines
+
+### 4.5.1 Polynomial regression
+```{r}
+d$weight_s = (d$weight - mean(d$weight)) / sd(d$weight)
+d$weight_s2 = d$weight_s ^ 2
+m4_5 = quap(
+    alist(
+        height ~ dnorm(mu, sigma),
+        mu <- a + b1 * weight_s + b2 * weight_s2,
+        a ~ dnorm(178, 20),
+        b1 ~ dlnorm(0, 1),
+        b2 ~ dnorm(0, 1),
+        sigma ~ dunif(0, 50)
+    ),
+    data = d
+)
+```
+
+```{r}
+precis(m4_5)
+```
+
+```{r}
+weight_seq = seq(-2.2, 2, length.out = 30)
+pred_dat = list(weight_s = weight_seq, weight_s2 = weight_seq ^ 2)
+
+mu = link(m4_5, data = pred_dat)
+mu_mean = apply(mu, 2, mean)
+mu_PI = apply(mu, 2, PI, prob = 0.89)
+
+sim_height = sim(m4_5, data = pred_dat)
+height_PI = apply(sim_height, 2, PI, prob = 0.89)
+```
+
+```{r}
+plot(height ~ weight_s, d, col = col.alpha(rangi2, 0.5))
+lines(weight_seq, mu_mean)
+shade(mu_PI, weight_seq)
+shade(height_PI, weight_seq)
+```
+
+```{r}
+d$weight_s3 = d$weight_s ^ 3
+m4_6 = quap(
+    alist(
+        height ~ dnorm(mu, sigma),
+        mu <- a + b1 * weight_s + b2 * weight_s2 + b3 * weight_s3,
+        a ~ dnorm(178, 20),
+        b1 ~ dlnorm(0, 1),
+        b2 ~ dnorm(0, 10),
+        b3 ~ dnorm(0, 10),
+        sigma ~ dunif(0, 50)
+    ),
+    data = d
+)
+```
+
+```{r}
+plot(height ~ weight_s, d, col = col.alpha(rangi2, 0.5), xaxt = "n")
+```
+
+```{r}
+at = c(-2, -1, 0, 1, 2)
+labels = at * sd(d$weight) + mean(d$weight)
+axis(side = 1, at = at, labels = round(labels, 1))
+```
+
+### 4.5.2 Splines
+```{r}
+data(cherry_blossoms)
+d = cherry_blossoms
+precis(d)
+```
+
+```{r}
+d2 = d[complete.cases(d$doy), ]
+num_knots = 15
+knot_list = quantile(d2$year, probs = seq(0, 1, length.out = num_knots))
+```
+
+```{r}
+B = bs(d2$year,
+       knots = knot_list[-c(1, num_knots)],
+       degree = 3, intercept = TRUE)
+```
+
+```{r}
+plot(NULL, xlim = range(d2$year), ylim = c(0, 1),
+     xlab = "year", ylab = "basis")
+for (i in 1:ncol(B)) {
+    lines(d2$year, B[, i])
+}
+```
+
+```{r}
+m4_7 = quap(
+    alist(
+        D ~ dnorm(mu, sigma),
+        mu <- a + B %*% w,
+        a ~ dnorm(100, 10),
+        w ~ dnorm(0, 10),
+        sigma ~ dexp(1)
+    ),
+    data = list(D = d2$doy, B = B),
+    start = list(w = rep(0, ncol(B)))
+)
+```
+
+```{r}
+post = extract.samples(m4_7)
+w = apply(post$w, 2, mean)
+plot(NULL, xlim = range(d2$year), ylim = c(-6, 6),
+     xlab = "year", ylab = "basis * weight")
+for (i in 1:ncol(B)) {
+    lines(d2$year, w[i] * B[, i])
+}
+```
+
+```{r}
+m4_7alt = quap(
+    alist(
+        D ~ dnorm(mu, sigma),
+        mu <- a + sapply(1:827, \(i) sum(B[i, ] * w)),
+        a ~ dnorm(100, 1),
+        w ~ dnorm(0, 10),
+        sigma ~ dexp(1)
+    ),
+    data = list(D = d2$doy, B = B),
+    start = list(w = rep(0, ncol(B)))
+)
+```
+
+### 4.5.3 Smooth functions for a rough world
+
+## 4.6 Summary
+
+## 4.7 Practice
+
+### 4E1
+
+### 4E2
+
+### 4E4
+
+### 4E5
+
+### 4M1
+
+### 4M2
+
+### 4M3
+
+### 4M4
+
+### 4M5
+
+### 4M6
+
+### 4M7
+
+### 4M8
+
+### 4H1
+
+### 4H2
+
+### 4H3
+
+### 4H4
+
+### 4H5
+
+### 4H6
+
+### 4H7
