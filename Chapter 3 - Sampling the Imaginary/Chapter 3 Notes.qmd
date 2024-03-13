@@ -335,11 +335,27 @@ table(w) / length(w)
 Suppose you want to estimate the Earth's proportion of water very precisely. Specifically, you want the 99% percentile interval of the posterior distribution of $p$ to be only 0.05 wide. This means the distance between the upper and lower bound of the interval should be 0.05. How many times will you have to toss the globe to do this?
 ```{r}
 p = Binomial(size = 1, p = 0.7)
-pi-=  _width = numeric()
-tosses = 0
+p_grid = seq(from = 0, to = 1, length.out = 1000)
+prior = rep(1, 1000)
 
-while(pi_width != 0.5) {
+PI_width = 0
+
+tosses = 0
+w = 0
+
+while(PI_width != 0.05) {
     outcome = random(p)
+    tosses = tosses + 1
+
+    if(outcome == 1) {
+        w = w + 1
+    }
+    likelihood = pdf(Binomial(size = tosses, p = p_grid), w)
+    posterior = prior * likelihood
+    posterior = posterior / sum(posterior)
+    samples = sample(p_grid, size = 1e4, prob = posterior, replace = TRUE)
+    PI_width = round(diff(unname(PI(samples, prob = 0.99))), 2)
+    prior = posterior
 }
 ```
 
