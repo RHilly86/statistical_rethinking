@@ -198,6 +198,7 @@ posterior = posterior / np.sum(posterior)
 ```
 
 ```{python}
+rng = np.random.default_rng()
 samples = rng.choice(a=p_grid, size=10_000, replace=True, p=posterior)
 ```
 
@@ -210,6 +211,162 @@ np.mean(samples < 0.2)
 
 ### 3E2
 How much posterior probability lies below $p = 0.8$?
-```{python}
 
+```{python}
+np.mean(samples < 0.8)
 ```
+
+### 3E3
+How much posterior probability lies between $p = 0.2$ and $p = 
+```{python}
+np.mean((samples > 0.2) & (samples < 0.8))
+```
+
+### 3E4
+20% of the posterior probability lies below which value of $p$?
+```{python}
+np.quantile(samples, 0.2)
+```
+
+### 3E5
+20% of the posterior probability lies above which value of $p$?
+
+```{python}
+np.quantile(samples, 0.8)
+```
+
+### 3E6
+Which values of $p$ contain the narrowest interval equal to 66% of the posterior probability?
+```{python}
+az.hdi(samples, hdi_prob=0.66)
+```
+
+### 3E7
+Which values of $p$ contain 66% of the posterior probability, assuming equal posterior probability both below and above the interval?
+```{python}
+# TODO: Find a percentile interval function
+```
+
+### 3M1
+Suppose the globe tossing data had turned out to be 8 water in 15 tosses. Construct the posterior distribution, using grid approximation. Use the same flat prior as before.
+
+```{python}
+p_grid = np.linspace(start=0, stop=1, num=1000)
+prior = np.repeat(1, 1000)
+likelihood = stats.binom(n=15, p=p_grid).pmf(k=8)
+posterior = prior * likelihood
+posterior = posterior / np.sum(posterior)
+```
+
+### 3M2
+Draw 10,000 samples from the grid approximation from above. Then use the samples to calculate the 90% HPDI for $p$.
+```{python}
+samples = rng.choice(a=p_grid, size=10_000, p=posterior, replace=True)
+az.hdi(samples, hdi_prob=0.9)
+```
+
+### 3M3
+Construct a posterior predictive check for this model and data. This means simulate the distribution of samples, averaging over the posterior uncertainty in $p$. What is the probability of observing 8 water in 15 tosses?
+
+```{python}
+w = stats.binom(n=15, p=samples).rvs()
+np.mean(w == 8)
+```
+
+```{python}
+valmap(lambda x: x / len(w), frequencies(w))
+```
+
+### 3M4
+Using the posterior distribution constructed from the new (8/15) data, now calculate the probability of observing 6 water in 9 tosses.
+
+```{python}
+prior = posterior
+likelihood = stats.binom(n=9, p=p_grid).pmf(k=6)
+posterior = prior * likelihood
+posterior = posterior / np.sum(posterior)
+```
+
+### 3M5
+Start over at 3M1, but now use a prior that is zero below $p = 0.5$ and a constant above $p = 0.5$. This corresponds to prior information that a majority of the Earth's surface is water. Repeat each problem above and compare the inferences. What difference does the better prior make? If it helps, compare inferences (using both priors) to the true value $p = 0.7$.
+
+```{python}
+p_grid = np.linspace(start=0, stop=1, num=1000)
+prior = np.where(p_grid < 0.5, 0, 1)
+likelihood = stats.binom(n=15, p=p_grid).pmf(k=8)
+posterior = prior * likelihood
+posterior = posterior / np.sum(posterior)
+```
+
+```{python}
+samples = rng.choice(a=p_grid, size=10_000, p=posterior, replace=True)
+az.hdi(samples, hdi_prob=0.9)
+```
+
+```{python}
+w = stats.binom(n=15, p=samples).rvs()
+np.mean(w == 8)
+```
+
+```{python}
+valmap(lambda x: x / len(w), frequencies(w))
+```
+
+```{python}
+prior = posterior
+likelihood = stats.binom(n=9, p=p_grid).pmf(k=6)
+posterior = prior * likelihood
+posterior = posterior / np.sum(posterior)
+```
+
+```{python}
+samples = rng.choice(a=p_grid, size=10_000, p=posterior, replace=True)
+az.hdi(samples, hdi_prob=0.9)
+```
+
+```{python}
+w = stats.binom(n=9, p=samples).rvs()
+np.mean(w == 8)
+```
+
+```{python}
+valmap(lambda x: x / len(w), frequencies(w))
+```
+
+### 3M6
+Suppose you want to estimate the Earth's proportion of water very precisely. Specifically, you want the 99% percentile interval of the posterior distribution of $p$ to be only 0.05 wide. This means the distance between the upper and lower bound of the interval should be 0.05. How many times will you have to toss the globe to do this?
+
+```{python}
+p_grid = np.linspace(start=0, stop=1, num=1000)
+prior = np.repeat(1, 1000)
+
+PI_width = 0
+tosses = 0
+w = 0
+
+while PI_width != 0.05:
+    outcome = stats.binom(n=1, p=0.7).rvs()
+    tosses += 1
+
+    if outcome == 1:
+        w += 1
+
+    likelihood = stats.binom(n=tosses, p=p_grid).pmf(k=w)
+    posterior = prior * likelihood
+    posterior = posterior / np.sum(posterior)
+    samples = rng.choice(a=p_grid, size=10_000, p=posterior, replace=True)
+    PI_width = np.round(np.diff(az.hdi(samples, hdi_prob=0.99)), 2)
+    prior = posterior
+```
+
+## Hard
+
+### 3H1
+
+### 3H2
+
+### 3H3
+
+### 3H4
+
+### 3H5

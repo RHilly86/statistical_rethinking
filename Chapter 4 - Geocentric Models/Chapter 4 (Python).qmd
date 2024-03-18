@@ -1,0 +1,357 @@
+---
+title: "Chapter 4 Notes"
+format: html
+---
+
+```{python}
+import polars as pl
+import pymc as pm
+from pymc import Normal, Uniform, LogNormal, Deterministic
+import matplotlib.pyplot as plt
+import numpy as np
+import arviz as az
+from scipy import stats
+from toolz import frequencies, valmap
+import seaborn as sns
+```
+
+## 4.1 Why normal distributions are normal
+
+### 4.1.1 Normal by addition
+
+```{python}
+rng = np.random.default_rng()
+plt.style.use("bmh")
+```
+
+```{python}
+stats.uniform(loc=-1, scale=1).rvs()
+```
+
+```{python}
+pos = stats.uniform(loc=-1, scale=1).rvs(size=(1000, 16))
+```
+
+### 4.1.2 Normal by multiplication
+
+```{python}
+np.prod(1 + stats.uniform(loc=0, scale=0.1).rvs(size=12))
+```
+
+```{python}
+growth = np.prod(1 + stats.uniform(loc=0, scale=0.1).rvs(size=(10_000, 12)), axis=1)
+sns.kdeplot(growth)
+```
+
+```{python}
+big = np.prod(1 + stats.uniform(loc=0, scale=0.5).rvs(size=(10_000, 12)), axis=1)
+small = np.prod(1 + stats.uniform(loc=0, scale=0.01).rvs(size=(10_000, 12)), axis=1)
+```
+
+### 4.1.3 Normal by log-multiplication
+```{python}
+log_big = np.log(np.prod(1 + stats.uniform(loc=0, scale=0.5).rvs(size=(10_000, 12)), axis=1))
+```
+
+### 4.1.4 Using Gaussian distributions
+
+## 4.2 A language for describing models
+
+### 4.2.1 Re-describing the globe tossing model
+```{python}
+w = 6
+n = 9
+p_grid = np.linspace(start=0, stop=1, num=100)
+posterior = stats.binom(n=n, p=p_grid).pmf(k=w) * stats.uniform(loc=0, scale=1).pdf(x=p_grid)
+posterior = posterior / np.sum(posterior)
+```
+
+## 4.3 Gaussian model of height
+
+### 4.3.1 The data
+
+```{python}
+d = pl.read_csv("/Users/rhilly/statistical_rethinking/Chapter 4 - Geocentric Models/Howell1.csv")
+```
+
+```{python}
+d.glimpse()
+```
+
+```{python}
+d["height"]
+```
+
+```{python}
+d2 = d.filter(pl.col("age") >= 18)
+```
+
+### 4.3.2 The model
+
+```{python}
+fig, ax = plt.subplots()
+
+x = np.arange(100, 251)
+y = stats.norm(loc=178, scale=20).pdf(x)
+
+ax.plot(x, y)
+```
+
+```{python}
+fig, ax = plt.subplots()
+
+x = np.arange(-10, 61)
+y = stats.uniform(loc=0, scale=50).pdf(x)
+
+ax.plot(x, y)
+```
+
+```{python}
+sample_mu = stats.norm(loc=178, scale=20).rvs(size=10_000)
+sample_sigma = stats.uniform(loc=0, scale=50).rvs(size=10_000)
+prior_h = stats.norm(loc=sample_mu, scale=sample_sigma).rvs()
+
+sns.kdeplot(prior_h)
+```
+
+```{python}
+sample_mu = stats.norm(loc=178, scale=100).rvs(size=10_000)
+prior_h = stats.norm(loc=sample_mu, scale=sample_sigma).rvs()
+
+sns.kdeplot(prior_h)
+```
+
+### 4.3.3 Grid approximation of the posterior distribution
+```{python}
+mu_list = np.linspace(start=150, stop=160, num=100)
+sigma_list = np.linspace(start=7, stop=9, num=100)
+
+mu_coord, sigma_coord = np.meshgrid(mu_list, sigma_list)
+post = np.stack((mu_coord.ravel(), sigma_coord.ravel()), axis=-1)
+
+LL = [
+    np.sum(stats.norm(loc=post[:, 0][i], scale=post[:, 1][i]).logpdf(x=d2["height"]))
+    for i in range(post.shape[0])
+]
+prod = LL + stats.norm(loc=178, scale=20).logpdf(x=post[:, 0]) + stats.uniform(loc=0, scale=50).logpdf(x=post[:, 1])
+prob = np.exp(prod - np.max(prod))
+```
+
+
+```{python}
+fig, ax = plt.subplots()
+
+ax.contourf(post[:, 0].reshape(mu_coord.shape),
+             post[:, 1].reshape(sigma_coord.shape),
+             prob.reshape(mu_coord.shape))
+```
+
+### 4.3.4 Sampling from the posetrior
+
+```{python}
+sample_rows = rng.choice(a=np.arange(len(post)), size=10_000, p=prob / np.sum(prob), replace=True)
+sample_mu = post[:, 0][sample_rows]
+sample_sigma = post[:, 1][sample_rows]
+```
+
+```{python}
+fig, ax = plt.subplots()
+ax.scatter(sample_mu, sample_sigma)
+```
+
+```{python}
+sns.kdeplot(sample_mu)
+```
+
+```{python}
+sns.kdeplot(sample_sigma)
+```
+
+```{python}
+az.hdi(sample_mu)
+```
+
+```{python}
+az.hdi(sample_sigma)
+```
+
+```{python}
+d3 = rng.choice(a=d2["height"], size=20)
+```
+
+```{python}
+mu_list = np.linspace(start=150, stop=170, num=200)
+sigma_list = np.linspace(start=4, stop=20, num=200)
+
+mu_coord, sigma_coord = np.meshgrid(mu_list, sigma_list)
+post2 = np.stack((mu_coord.ravel(), sigma_coord.ravel()), axis=-1)
+
+LL2 = [
+    np.sum(stats.norm(loc=post2[:, 0][i], scale=post2[:, 1][i]).logpdf(x=d3))
+    for i in np.arange(len(post2))
+]
+prod2 = LL2 + stats.norm(loc=178, scale=20).logpdf(x=post2[:, 0]) + stats.uniform(loc=0, scale=50).logpdf(x=post2[:, 1])
+prob2 = np.exp(prod2 - np.max(prod2))
+
+sample2_rows = rng.choice(a=np.arange(len(post2)), size=10_000, p=prob2 / np.sum(prob2), replace=True)
+sample2_mu = post2[:, 0][sample2_rows]
+sample2_sigma = post2[:, 1][sample2_rows]
+```
+
+```{python}
+sns.kdeplot(sample2_sigma)
+```
+
+### 4.3.5 Finding the posterior with `pymc`
+```{python}
+with pm.Model() as m4_1:
+    mu = Normal("mu", mu=178, sigma=20)
+    sigma = Uniform("sigma", lower=0, upper=50)
+
+    Normal("height", mu=mu, sigma=sigma, observed=d2)
+```
+
+```{python}
+with m4_1:
+    m4_1_idata = pm.sample()
+```
+
+```{python}
+az.plot_trace(m4_1_idata)
+```
+
+```{python}
+az.summary(m4_1_idata, round_to=2, kind="stats")
+```
+
+## 4.4 Linear prediction
+```{python}
+fig, ax = plt.subplots()
+ax.scatter(d2["weight"], d2["height"])
+```
+
+### 4.4.1 The linear model strategy
+
+#### 4.4.1.1 Probability of the data
+
+#### 4.4.1.2 Linear model
+
+#### 4.4.1.3 Priors
+```{python}
+N = 100
+a = stats.norm(loc=178, scale=20).rvs(size=N) 
+b = stats.norm(loc=0, scale=10).rvs(size=N)
+```
+
+```{python}
+fig, ax = plt.subplots()
+
+xbar = d2["weight"].mean()
+x = np.linspace(start=d2["weight"].min(), stop=d2["weight"].max(), num=N)
+
+for i in range(N):
+    mu = a[i] + b[i] * (x - xbar)
+    ax.plot(mu, color="black", alpha=0.2)
+```
+
+```{python}
+b = stats.lognorm(s=1, scale=1).rvs(size=10_000)
+sns.kdeplot(b)
+```
+
+```{python}
+N = 100
+a = stats.norm(loc=178, scale=20).rvs(size=N)
+b = stats.lognorm(s=1, scale=1).rvs(size=N)
+```
+
+### 4.4.2 Finding the posterior distribution
+```{python}
+xbar = d2["weight"].mean()
+
+with pm.Model() as m4_3:
+    a = Normal("a", mu=178, sigma=20)
+    b = LogNormal("b", mu=0, sigma=1)
+    sigma = Uniform("sigma", lower=0, upper=50)
+
+    mu = Deterministic("mu", a + b * (d2["weight"].to_numpy() - xbar))
+
+    Normal("height", mu=mu, sigma=sigma, observed=d2["height"])
+```
+
+```{python}
+with m4_3:
+    m4_3_idata = pm.sample()
+```
+
+### 4.4.3 Interpreting the posterior distribution
+
+#### 4.4.3.1 Tables of marginal distributions
+
+#### 4.4.3.2 Plotting posterior inference against the data
+```{python}
+fig, ax = plt.subplots()
+
+a_map = m4_3_idata.posterior["a"].mean().to_numpy()
+b_map = m4_3_idata.posterior["b"].mean().to_numpy()
+
+x = np.linspace(start=d2["weight"].min(), stop=d2["weight"].max(), num=d2.shape[0])
+mu = a_map + b_map * (d2["weight"] - xbar)
+
+ax.scatter(d2["weight"], d2["height"])
+ax.plot(d2["weight"], mu)
+```
+
+#### 4.4.3.3 Adding uncertainty around the mean
+
+```{python}
+N = 10
+dN = d2.slice(0, N)
+
+with pm.Model() as mN:
+    a = Normal("a", mu=178, sigma=20)
+    b = LogNormal("b", mu=0, sigma=1)
+    sigma = Uniform("sigma", lower=0, upper=50)
+
+    mu = a + b * (dN["weight"].to_numpy() - dN["weight"].mean())
+
+    Normal("height", mu=mu, sigma=sigma, observed=dN["height"])
+```
+
+```{python}
+with mN:
+    mN_idata = pm.sample()
+```
+
+```{python}
+post = az.extract(mN_idata, num_samples=20)
+xbar = dN["weight"].mean()
+
+a = post["a"].to_numpy()
+b = post["b"].to_numpy()
+
+fig, ax = plt.subplots()
+ax.scatter(dN["weight"], dN["height"])
+
+for i in range(20):
+    mu = a[i] + b[i] * (dN["weight"] - xbar)
+    ax.plot(dN["weight"], mu, color="black", alpha=0.2)
+```
+
+#### 4.4.3.4 Plotting regression intervals and contours
+```{python}
+post = az.extract(m4_3_idata)
+mu_at_50 = post["a"] + post["b"] * (50 - xbar)
+```
+
+```{python}
+sns.kdeplot(mu_at_50)
+```
+
+```{python}
+az.hdi(mu_at_50.to_numpy(), hdi_prob=0.89)
+```
+
+```{python}
+mu = post["mu"].T
+```
