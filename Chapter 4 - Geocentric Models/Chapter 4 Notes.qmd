@@ -5,17 +5,20 @@ format: html
 
 ```{julia}
 using DataFrames
+using DataFramesMeta
 using Distributions
 using CairoMakie
 using StatsBase
 using StatisticalRethinking
 using Turing
 using RDatasets
+using CSV
+using BSplines
 ```
 
 ## 4.1 Why normal distributions are normal
 
-### 4.1.1 Normal by addition
+### 4.1.1 Normal by additio
 
 ```{julia}
 pos = vec(sum(rand(Uniform(-1, 1), (1000, 16)), dims=2))
@@ -61,113 +64,123 @@ posterior = posterior / sum(posterior)
 ## 4.3 Gaussian model of height
 
 ### 4.3.1 The data
-```{r}
-data(Howell1)
-d = Howell1
+
+```{julia}
+d = CSV.read("Chapter 4 - Geocentric Models/Howell1.csv", DataFrame)
 ```
 
-```{r}
-str(d)
+```{julia}
+d[:, :height]
 ```
 
-```{r}
-precis(d)
-```
-
-```{r}
-d$height
-```
-
-```{r}
-d2 = subset(d, age >= 18)
+```{julia}
+d2 = d[d.age .>= 18, :]
 ```
 
 ### 4.3.2 The model
 
-```{r}
-curve(pdf(Normal(mu = 178, sigma = 20), x), from = 100, to = 250)
+```{julia}
+x = 100:250
+y = pdf.(Normal(178, 20), x)
+
+lines(x, y)
 ```
 
-```{r}
-curve(pdf(Uniform(a = 0, b = 50), x), from = -10, to = 60)
+```{julia}
+x = -10:60
+y = pdf.(Uniform(0, 50), x)
+
+lines(x, y)
 ```
 
-```{r}
-sample_mu = random(Normal(mu = 178, sigma = 20), 10000)
-sample_sigma = random(Uniform(a = 0, b = 50), 10000)
-prior_h = random(Normal(mu = sample_mu, sigma = sample_sigma))
-dens(prior_h)
+```{julia}
+sample_mu = rand(Normal(178, 20), 10_000)
+sample_sigma = rand(Uniform(0, 50), 10_000)
+prior_h = rand.(Normal.(sample_mu, sample_sigma))
+
+density(prior_h)
 ```
 
-```{r}
-sample_mu = random(Normal(mu = 178, sigma = 100), 10000)
-prior_h = random(Normal(mu = sample_mu, sigma = sample_sigma))
-dens(prior_h)
+```{julia}
+sample_mu = rand(Normal(178, 100), 10_000)
+prior_h = rand.(Normal.(sample_mu, sample_sigma))
+
+density(prior_h)
 ```
 
 ### 4.3.3 Grid approximation of the posterior distribution
-```{r}
-mu_list = seq(150, 160, length.out = 100)
-sigma_list = seq(7, 9, length.out = 100)
-post = expand.grid(mu = mu_list, sigma = sigma_list)
 
-post$LL = sapply(1:nrow(post), \(i) sum(
-    log_pdf(Normal(mu = post$mu[i], sigma = post$sigma[i]), d2$height)
-))
-post$prod = post$LL + log_pdf(Normal(mu = 178, sigma = 20), post$mu) + log_pdf(Uniform(a = 0, b = 50), post$sigma)
-post$prob = exp(post$prod - max(post$prod))
+```{julia}
+mu_list = range(start=150, stop=160, length=100)
+sigma_list = range(start=7, stop=9, length=100)
+post = DataFrame(Iterators.product(mu_list, sigma_list), [:mu, :sigma])
+
+LL = map(i -> sum(logpdf.(Normal(post.mu[i], post.sigma[i]), d2.height)), 1:nrow(post))
+LL_prod = LL + logpdf.(Normal(178, 20), post.mu) + logpdf.(Uniform(0, 50), post.sigma)
+prob = exp.(LL_prod .- maximum(LL_prod))
+
+@transform!(post, :LL=LL, :prod=LL_prod, :prob=prob)
 ```
 
-```{r}
-contour_xyz(post$mu, post$sigma, post$prob)
+```{julia}
+contour(post.mu, post.sigma, post.prob)
 ```
 
-```{r}
-image_xyz(post$mu, post$sigma, post$prob)
-```
 
 ### 4.3.4 Sampling from the posterior
-```{r}
-sample_rows = sample(1:nrow(post), size = 10000, prob = post$prob, replace = TRUE)
-sample_mu = post$mu[sample_rows]
-sample_sigma = post$sigma[sample_rows]
+
+```{julia}
+sample_rows = sample(1:nrow(post), Weights(post.prob), 10_000, replace=true)
+sample_mu = post.mu[sample_rows]
+sample_sigma = post.sigma[sample_rows]
 ```
 
-```{r}
-plot(sample_mu, sample_sigma, cex = 0.5, pch = 16, col = col.alpha(rangi2, 0.1))
+```{julia}
+scatter(sample_mu, sample_sigma)
 ```
 
-```{r}
-dens(sample_mu)
-dens(sample_sigma)
+```{julia}
+density(sample_mu)
 ```
 
-```{r}
+```{julia}
+density(sample_sigma)
+```
+
+```{julia}
 PI(sample_mu)
+```
+
+```{julia}
 PI(sample_sigma)
 ```
 
-```{r}
-d3 = sample(d2$height, size = 20)
+```{julia}
+d3 = sample(d2.height, 20)
 ```
 
-```{r}
-mu_list = seq(150, 170, length.out = 200)
-sigma_list = seq(4, 20, length.out = 200)
-post2 = expand.grid(mu = mu_list, sigma = sigma_list)
+```{julia}
+mu_list = range(start=150, stop=170, length=200)
+sigma_list = range(start=4, stop=20, length=200)
+post2 = DataFrame(Iterators.product(mu_list, sigma_list), [:mu, :sigma])
 
-post2$LL = sapply(1:nrow(post2), \(i) sum(
-    log_pdf(Normal(mu = post2$mu[i], sigma = post2$sigma[i]), d3)
-))
-post2$prod = post2$LL + log_pdf(Normal(mu = 178, sigma = 20), post2$mu) + log_pdf(Uniform(a = 0, b = 50), post2$sigma)
+LL = map(i -> sum(logpdf.(Normal(post2.mu[i], post2.sigma[i]), d3)), 1:nrow(post2))
+LL_prod = LL + logpdf.(Normal(178, 20), post2.mu) + logpdf.(Uniform(0, 50), post2.sigma)
+prob = exp.(LL_prod .- maximum(LL_prod))
 
-sample2_rows = sample(1:nrow(post2), size = 1e4, prob = post2$prob, replace = TRUE)
-sample2_mu = post2$mu[sample2_rows]
-sample2_sigma = post2$sigma[sample2_rows]
+@transform!(post2, :LL=LL, :prod=LL_prod, :prob=prob)
 
-plot(sample2_mu, sample2_sigma, cex = 0.5,
-     col = col.alpha(rangi2, 0.1),
-     xlab = "mu", ylab = "sigma", pch = 16)
+sample2_rows = sample(1:nrow(post2), Weights(post2.prob), 10_000, replace=true)
+sample2_mu = post2.mu[sample2_rows]
+sample2_sigma = post2.sigma[sample2_rows]
+``` 
+
+```{julia}
+scatter(sample2_mu, sample2_sigma)
+```
+
+```{julia}
+density(sample2_sigma)
 ```
 
 ```{r}
@@ -176,33 +189,36 @@ dens(sample2_sigma, norm.comp = TRUE)
 
 ### 4.3.5 Finding the posterior distribution with `quap`
 
-```{r}
-flist = alist(
-    height ~ dnorm(mu, sigma),
-    mu ~ dnorm(178, 20),
-    sigma ~ dunif(0, 50)
-)
+```{julia}
+@model function m4_1(height)
+    μ ~ Normal(178, 20)
+    σ ~ Uniform(0, 50)
+
+    return height ~ Normal(μ, σ)
+end
 ```
 
-```{r}
-m4_1 = quap(flist, data = d2)
+```{julia}
+m4_1_samples = sample(m4_1(d2.height), NUTS(), MCMCThreads(), 1000, 4)
 ```
 
-```{r}
-precis(m4_1)
+```{julia}
+m4_1_samples
 ```
 
-```{r}
-m4_2 = quap(
-    alist(
-        height ~ dnorm(mu, sigma),
-        mu ~ dnorm(178, 0.1),
-        sigma ~ dunif(0, 50)
-    ),
-    data = d2
-)
-precis(m4_2)
+```{julia}
+@model function m4_2(height)
+    μ ~ Normal(178, 0.1)
+    σ ~ Uniform(0, 50)
+
+    return height ~ Normal(μ, σ)
+end
 ```
+
+```{julia}
+m4_2_samples = sample(m4_2(d2.height), NUTS(), MCMCThreads(), 1000, 4)
+```
+
 
 ### 4.3.6 Sampling from a `quap`
 ```{r}
@@ -214,8 +230,8 @@ diag(vcov(m4_1))
 cov2cor(vcov(m4_1))
 ```
 
-```{r}
-post = extract.samples(m4_1, n = 1e4)
+```{julia}
+post = DataFrame(m4_2_samples)
 ```
 
 ```{r}
@@ -229,8 +245,8 @@ post = mvrnorm(n = 1e4, mu = coef(m4_1), Sigma = vcov(m4_1))
 
 ## 4.4 Linear prediction
 
-```{r}
-plot(d2$height ~ d2$weight)
+```{julia}
+scatter(d2.weight, d2.height)
 ```
 
 ### 4.4.1 The linear model strategy
@@ -240,69 +256,80 @@ plot(d2$height ~ d2$weight)
 #### 4.4.1.2 Linear model
 
 #### 4.4.1.3 Priors
-```{r}
-set.seed(2971)
 
+```{julia}
 N = 100
-a = random(Normal(mu = 178, sigma = 20), N)
-b = random(Normal(mu = 0, sigma = 10), N)
+a = rand(Normal(178, 20), N)
+b = rand(Normal(0, 10), N)
 ```
 
-```{r}
-plot(NULL, xlim = range(d2$weight), ylim = c(-100, 400),
-           xlab = "weight", ylab = "height")
-abline(h = 0, lty = 2)
-abline(h = 272, lty = 1, lwd = 0.5)
-mtext("b ~ dnorm(0, 10)")
-xbar = mean(d2$weight)
+```{julia}
+xbar = mean(d2.weight)
+x = range(start=minimum(d2.weight), stop=maximum(d2.weight), length=N)
 
-for (i in 1:N) {
-    curve(a[i] + b[i] * (x - xbar),
-    from = min(d2$weight), to = max(d2$weight), add = TRUE,
-    col = col.alpha("black", 0.2))
-}
+fig = Figure()
+ax = Axis(fig[1, 1])
+
+for i in 1:N
+    mu = a[i] .+ b[i] .* (x .- xbar)
+    lines!(ax, x, mu, color=:black, alpha=0.4)
+end
+
+fig
 ```
 
-```{r}
-b = random(LogNormal(log_mu = 0, log_sigma = 1), 1e4)
-dens(b, xlim = c(0, 5), adj = 0.1)
+```{julia}
+b = rand(LogNormal(0, 1), 10_000)
+density(b)
 ```
 
-```{r}
-set.seed(2971)
-
+```{julia}
 N = 100
-a = random(Normal(mu = 178, sigma = 20), N)
-b = random(LogNormal(log_mu = 0, log_sigma = 1), N)
+a = rand(Normal(178, 20), N)
+b = rand(LogNormal(0, 1), N)
 ```
+
+
+
+
 
 ### 4.4.2 Finding the posterior distribution
-```{r}
-xbar = mean(d2$weight)
+```{julia}
+xbar = mean(d2.weight)
 
-m4_3 = quap(
-    alist(
-        height ~ dnorm(mu, sigma),
-        mu <- a + b * (weight - xbar),
-        a ~ dnorm(178, 20),
-        b ~ dlnorm(0, 1),
-        sigma ~ dunif(0, 50)
-    ),
-    data = d2
-)
+@model function m4_3(height, weight)
+    α ~ Normal(178, 20)
+    β ~ LogNormal(0, 1)
+    σ ~ Uniform(0, 50)
+
+    μ = α .+ β .* (weight .- xbar)
+    
+    for i in eachindex(height)
+        height[i] ~ Normal(μ[i], σ)
+    end
+end
 ```
 
-```{r}
-m4_3b = quap(
-    alist(
-        height ~ dnorm(mu, sigma),
-        mu <- a + exp(log_b) * (weight - xbar),
-        a ~ dnorm(178, 20),
-        log_b ~ dnorm(0, 1),
-        sigma ~ dunif(0, 50)
-    ),
-    data = d2
-)
+```{julia}
+m4_3_samples = sample(m4_3(d2.height, d2.weight), NUTS(), MCMCThreads(), 1000, 4)
+```
+
+```{julia}
+@model function m4_3b(height, weight)
+    α ~ Normal(178, 20)
+    log_β ~ Normal(0, 1)
+    σ ~ Uniform(0, 50)
+
+    μ = α .+ exp.(log_β) .* (weight .- xbar)
+
+    for i in eachindex(height)
+        height[i] ~ Normal(μ[i], σ)
+    end
+end
+```
+
+```{julia}
+m4_3b_samples = sample(m4_3b(d2.height, d2.weight), NUTS(), MCMCThreads(), 1000, 4)
 ```
 
 ### 4.4.3 Interpreting the posterior distribution
@@ -317,222 +344,275 @@ round(vcov(m4_3), 3)
 ```
 
 #### 4.4.3.2 Plotting posterior inference against the data
-```{r}
-plot(height ~ weight, data = d2, col = rangi2)
-post = extract.samples(m4_3)
-a_map = mean(post$a)
-b_map = mean(post$b)
-curve(a_map + b_map * (x - xbar), add = TRUE)
+
+```{julia}
+post = DataFrame(m4_3_samples)
+a_map = mean(post.α)
+b_map = mean(post.β)
+mu = a_map .+ b_map .* (x .- xbar)
+
+fig = Figure()
+ax = Axis(fig[1, 1])
+
+scatter!(ax, d2.weight, d2.height)
+lines!(ax, x, mu, color=:black)
+fig
 ```
 
 #### 4.4.3.3 Adding uncertainty around the mean
-```{r}
-post = extract.samples(m4_3)
-post[1:5, ]
+
+```{julia}
+post = DataFrame(m4_3_samples)
+post[1:5, :]
 ```
 
-```{r}
+```{julia}
 N = 10
-dN = d2[1:N, ]
-mN = quap(
-    alist(
-        height ~ dnorm(mu, sigma),
-        mu <- a + b * (weight - mean(weight)),
-        a ~ dnorm(178, 20),
-        b ~ dlnorm(0, 1),
-        sigma ~ dunif(0, 50)
-    ),
-    data = dN
-)
+dN = d2[1:N, :]
+x = range(start=minimum(d2.weight), stop=maximum(d2.weight), length=N)
+
+@model function mN(height, weight)
+    α ~ Normal(178, 20)
+    β ~ LogNormal(0, 1)
+    σ ~ Uniform(0, 50)
+
+    μ = α .+ β .* (weight .- mean(weight))
+
+    for i in eachindex(height)
+        height[i] ~ Normal(μ[i], σ)
+    end
+    return μ
+end
 ```
 
-```{r}
-post = extract.samples(mN, n = 20)
-
-plot(dN$weight, dN$height,
-     xlim = range(d2$weight), ylim = range(d2$height),
-     col = rangi2, xlab = "weight", ylab = "height")
-mtext(concat("N = ", N))
-
-for (i in 1:20) {
-    curve(post$a[i] + post$b[i] * (x - mean(dN$weight)),
-          col = col.alpha("black", 0.3), add = TRUE)
-}
+```{julia}
+mN_samples = sample(mN(dN.height, dN.weight), NUTS(), MCMCThreads(), 1000, 4)
 ```
+
+```{julia}
+post = sample(DataFrame(mN_samples), 20, replace=false)
+
+fig = Figure()
+ax = Axis(fig[1, 1])
+
+scatter!(dN.weight, dN.height)
+for i in 1:20
+    mu = post.α[i] .+ post.β[i] .* (x .- mean(dN.weight))
+    lines!(ax, x, mu, color=:black, alpha=0.5)
+end
+
+fig
+```
+
 
 #### 4.4.3.4 Plotting regression intervals and contours
-```{r}
-post = extract.samples(m4_3)
-mu_at_50 = post$a + post$b * (50 - xbar)
+
+```{julia}
+post = DataFrame(m4_3_samples)
+mu_at_50 = post.α .+ post.β .* (50 - xbar)
 ```
 
-```{r}
-dens(mu_at_50, col = rangi2, lwd = 2, xlab = "mu|weight=50")
+```{julia}
+density(mu_at_50)
 ```
 
-```{r}
-PI(mu_at_50, prob = 0.89)
+```{julia}
+PI(mu_at_50; perc_prob=0.89)
 ```
 
-```{r}
-mu = link(m4_3)
-str(mu)
+```{julia}
+mu = vec(mean.(generated_quantities(mN(dN.height, dN.weight), mN_samples)))
 ```
 
-```{r}
-weight_seq = seq(25, 70, by = 1)
-mu = link(m4_3, data = data.frame(weight = weight_seq))
-str(mu)
+```{julia}
+weight_seq = 25:70
+mu_link = StatisticalRethinking.link(post, [:α, :β], weight_seq, xbar)
+mu = hcat(mu_link...)
+
+mu
 ```
 
-```{r}
-plot(height ~ weight, d2, type = "n")
+```{julia}
+fig = Figure()
+ax1 = Axis(fig[1, 1])
+ax2 = Axis(fig[1, 2])
 
-for (i in 1:100) {
-    points(weight_seq, mu[i, ], pch = 16, col = col.alpha(rangi2, 0.1))
-}
-```
+for i in 1:100
+    scatter!(ax1, weight_seq, mu[i, :], color=:blue, alpha=0.3)
+end
 
-```{r}
-mu_mean = apply(mu, 2, mean)
-mu_PI = apply(mu, 2, PI, prob = 0.89)
-```
+mu_mean = vec(mean(mu, dims=1))
+mu_PI = mapslices(x -> PI(x; perc_prob=0.89), mu, dims=1)
 
-```{r}
-plot(height ~ weight, data = d2, col = col.alpha(rangi2, 0.5))
-lines(weight_seq, mu_mean)
-shade(mu_PI, weight_seq)
+scatter!(ax2, d2.weight, d2.height)
+lines!(ax2, weight_seq, mu_mean)
+band!(ax2, weight_seq, mu_PI[1, :], mu_PI[2, :], color=:gray, alpha=0.1)
+
+fig
 ```
 
 #### 4.4.3.5 Prediction intervals
-```{r}
-sim_height = sim(m4_3, data = list(weight = weight_seq))
-str(sim_height)
+
+```{julia}
+sim_height = simulate(post, [:α, :β, :σ], weight_seq .- xbar)
+height_PI = mapslices(x -> PI(x; perc_prob=0.89), sim_height, dims=1)
+mu_HPDI = mapslices(x -> hpdi(x; alpha=0.89), mu, dims=1)
 ```
 
-```{r}
-height_PI = apply(sim_height, 2, PI, prob = 0.89)
-```
+```{julia}
+fig = Figure()
+ax = Axis(fig[1, 1])
 
-```{r}
-plot(height ~ weight, d2, col = col.alpha(rangi2, 0.5))
-lines(weight_seq, mu_mean)
-shade(mu_PI, weight_seq)
-shade(height_PI, weight_seq)
-```
+scatter!(ax, d2.weight, d2.height)
+lines!(ax, weight_seq, mu_mean)
+band!(ax, weight_seq, mu_HPDI[1, :], mu_HPDI[2, :],  color=:gray)
+band!(ax, weight_seq, height_PI[1, :], height_PI[2, :], color=:gray, alpha=0.2)
 
-```{r}
-sim_height = sim(m4_3, data = list(weight = weight_seq), n = 1e4)
-height_PI = apply(sim_height, 2, PI, prob = 0.89)
+fig
 ```
 
 ## 4.5 Curves from lines
 
 ### 4.5.1 Polynomial regression
-```{r}
-d$weight_s = (d$weight - mean(d$weight)) / sd(d$weight)
-d$weight_s2 = d$weight_s ^ 2
-m4_5 = quap(
-    alist(
-        height ~ dnorm(mu, sigma),
-        mu <- a + b1 * weight_s + b2 * weight_s2,
-        a ~ dnorm(178, 20),
-        b1 ~ dlnorm(0, 1),
-        b2 ~ dnorm(0, 1),
-        sigma ~ dunif(0, 50)
-    ),
-    data = d
-)
+
+```{julia}
+d = CSV.read("Chapter 4 - Geocentric Models/Howell1.csv", DataFrame)
+```
+```{julia}
+d = @chain d begin
+        @transform(:weight_s = (:weight .- mean(:weight)) / std(:weight))
+        @rtransform(:weight_s2 = :weight_s ^ 2)
+end
+```
+
+```{julia}
+@model function m4_5(height, weight_s, weight_s2)
+    α ~ Normal(178, 20)
+    β₁ ~ LogNormal(0, 1)
+    β₂ ~ Normal(0, 1)
+    σ ~ Uniform(0, 50)
+
+    μ = α .+ β₁ .* weight_s .+ β₂ .* weight_s2
+
+    for i in eachindex(weight_s)
+        height[i] ~ Normal(μ[i], σ)
+    end
+end
+```
+
+```{julia}
+m4_5_samples = sample(m4_5(d.height, d.weight_s, d.weight_s2), NUTS(), MCMCThreads(), 1000, 4)
 ```
 
 ```{r}
 precis(m4_5)
 ```
 
-```{r}
-weight_seq = seq(-2.2, 2, length.out = 30)
-pred_dat = list(weight_s = weight_seq, weight_s2 = weight_seq ^ 2)
+```{julia}
+weight_seq = range(start=-2.2, stop=2, length=30)
+weight_s2 = weight_seq .^2
+post = DataFrame(m4_5_samples)
 
-mu = link(m4_5, data = pred_dat)
-mu_mean = apply(mu, 2, mean)
-mu_PI = apply(mu, 2, PI, prob = 0.89)
+mu_link = StatisticalRethinking.link(post, (r, x) -> r.α + r.β₁ * x + r.β₂ * x ^ 2, weight_seq)
+mu = hcat(mu_link...)
+mu_mean = vec(mean(mu, dims=1))
 
-sim_height = sim(m4_5, data = pred_dat)
-height_PI = apply(sim_height, 2, PI, prob = 0.89)
+sim_height = simulate(post, (r, x) -> Normal(r.α + r.β₁ * x + r.β₂ * x ^ 2, r.σ), weight_seq)
+sim_height = transpose(hcat(sim_height...))
+height_PI = mapslices(x -> PI(x; perc_prob=0.89), sim_height, dims=1)
 ```
 
-```{r}
-plot(height ~ weight_s, d, col = col.alpha(rangi2, 0.5))
-lines(weight_seq, mu_mean)
-shade(mu_PI, weight_seq)
-shade(height_PI, weight_seq)
+```{julia}
+fig = Figure()
+ax = Axis(fig[1, 1])
+
+scatter!(ax, d.weight_s, d.height)
+lines!(ax, weight_seq, mu_mean)
+band!(ax, weight_seq, height_PI[1, :], height_PI[2, :], alpha=0.3)
+
+fig
 ```
 
-```{r}
-d$weight_s3 = d$weight_s ^ 3
-m4_6 = quap(
-    alist(
-        height ~ dnorm(mu, sigma),
-        mu <- a + b1 * weight_s + b2 * weight_s2 + b3 * weight_s3,
-        a ~ dnorm(178, 20),
-        b1 ~ dlnorm(0, 1),
-        b2 ~ dnorm(0, 10),
-        b3 ~ dnorm(0, 10),
-        sigma ~ dunif(0, 50)
-    ),
-    data = d
-)
+```{julia}
+@rtransform!(d, :weight_s3 = :weight_s ^ 3)
+
+@model function m4_6(height, weight_s, weight_s2, weight_s3)
+    α ~ Normal(178, 20)
+    β₁ ~ LogNormal(0, 1)
+    β₂ ~ Normal(0, 10)
+    β₃ ~ Normal(0, 10)
+    σ ~ Uniform(0, 50)
+
+    μ = α .+ β₁ .* weight_s .+ β₂ .* weight_s2 .+ β₃ .* weight_s3
+    for i in eachindex(weight_s)
+        height[i] ~ Normal(μ[i], σ)
+    end
+end
 ```
 
-```{r}
-plot(height ~ weight_s, d, col = col.alpha(rangi2, 0.5), xaxt = "n")
-```
-
-```{r}
-at = c(-2, -1, 0, 1, 2)
-labels = at * sd(d$weight) + mean(d$weight)
-axis(side = 1, at = at, labels = round(labels, 1))
+```{julia}
+m4_6_samples = sample(m4_6(d.height, d.weight_s, d.weight_s2, d.weight_s3), NUTS(), MCMCThreads(), 1000, 4)
 ```
 
 ### 4.5.2 Splines
-```{r}
-data(cherry_blossoms)
-d = cherry_blossoms
-precis(d)
+```{julia}
+d = CSV.read("Chapter 4 - Geocentric Models/cherry_blossoms.csv", DataFrame; missingstring="NA")
 ```
 
-```{r}
-d2 = d[complete.cases(d$doy), ]
+```{julia}
+d2 = dropmissing(d, :doy)
 num_knots = 15
-knot_list = quantile(d2$year, probs = seq(0, 1, length.out = num_knots))
+knots_list = quantile(d2.year, range(start=0, stop=1, length=num_knots))
 ```
 
-```{r}
-B = bs(d2$year,
-       knots = knot_list[-c(1, num_knots)],
-       degree = 3, intercept = TRUE)
+```{julia}
+basis = BSplineBasis(3, knots_list)
+
+xs = Matrix{Float64}(undef, 100, length(basis))
+ys = similar(xs)
+
+for (j, bspline) in enumerate(basis)
+    xmin, xmax = BSplines.support(bspline)
+    for (i, x) in enumerate(range(start=xmin, stop=xmax, length=100))
+        xs[i, j] = x
+        ys[i, j] = bspline(x)
+    end
+end
 ```
 
-```{r}
-plot(NULL, xlim = range(d2$year), ylim = c(0, 1),
-     xlab = "year", ylab = "basis")
-for (i in 1:ncol(B)) {
-    lines(d2$year, B[, i])
-}
+```{julia}
 ```
 
-```{r}
-m4_7 = quap(
-    alist(
-        D ~ dnorm(mu, sigma),
-        mu <- a + B %*% w,
-        a ~ dnorm(100, 10),
-        w ~ dnorm(0, 10),
-        sigma ~ dexp(1)
-    ),
-    data = list(D = d2$doy, B = B),
-    start = list(w = rep(0, ncol(B)))
-)
+```{julia}
+fig = Figure()
+ax = Axis(fig[1, 1])
+num_cols = size(xs)[2]
+
+for j in 1:num_cols
+    lines!(ax, xs[:, j], ys[:, j])
+end
+
+fig
+```
+
+```{julia}
+@model function m4_7(year, doy)
+    γ ~ MvNormal(zeros(length(basis)), 1)
+    α ~ Normal(100, 10)
+    s = Spline(basis, γ)
+    σ ~ Exponential(1)
+
+    μ = α .+ s.(year)
+    for i in eachindex(doy)
+        Normal(μ[i], σ)
+    end
+end
+
+m4_7_samples = sample(m4_7(d2.year, d2.doy), NUTS(0.65; init_ϵ = 9.765625e-5), MCMCThreads(), 1000, 4)
+```
+
+```{julia}
+post = DataFrame(m4_7_samples)
 ```
 
 ```{r}
